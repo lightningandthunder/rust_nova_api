@@ -10,7 +10,7 @@ unused = "allow"
 
 [dependencies]
 anyhow = "1.0.75"
-chrono = "0.4.31"
+chrono = "0.4.34"
 chrono-tz = "0.8.4"
 libc = "0.2"
 phf = { version = "0.11.2", features = ["macros"] }

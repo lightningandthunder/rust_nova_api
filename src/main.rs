@@ -1,9 +1,9 @@
 mod utils;
 
-use chrono::{NaiveDate, TimeZone};
+use chrono::{NaiveDate, TimeZone, Utc};
 use nova_rust::{
-    angular_precessed_planets_in_range, close_dll, create_sidereal_context, open_dll,
-    CoordinateRange, FlexibleDatetime, Location,
+    angular_precessed_planets_in_range, close_dll, create_sidereal_context,
+    find_next_solunar_utc_dt, open_dll, CoordinateRange, FlexibleDatetime, Location,
 };
 
 fn main() {
@@ -38,18 +38,28 @@ fn main() {
         max_latitude: 48,
     };
 
-    let a = angular_precessed_planets_in_range(radix_dt, target_dt, range, true, true, false);
-    for key in a.as_ref().unwrap().keys() {
-        println!("{}", key);
-        let v = &a.as_ref().unwrap()[key];
-        for angularity in v {
-            let (degree, minute, _) = utils::decimal_to_dms(angularity.orb);
-            println!(
-                "{} {} {}\u{00B0}{}'",
-                angularity.planet, angularity.framework, degree, minute
-            );
-        }
-    }
-    println!("Checked {} locations", a.unwrap().len());
+    // let a = angular_precessed_planets_in_range(radix_dt, target_dt, range, true, true, false);
+    // for key in a.as_ref().unwrap().keys() {
+    //     println!("{}", key);
+    //     let v = &a.as_ref().unwrap()[key];
+    //     for angularity in v {
+    //         let (degree, minute, _) = utils::decimal_to_dms(angularity.orb);
+    //         println!(
+    //             "{} {} {}\u{00B0}{}'",
+    //             angularity.planet, angularity.framework, degree, minute
+    //         );
+    //     }
+    // }
+    // println!("Checked {} locations", a.unwrap().len());
+
+    let target2 = NaiveDate::from_ymd_opt(2023, 4, 21)
+        .unwrap()
+        .and_hms_opt(0, 0, 0)
+        .unwrap();
+    let target_dt2 = chrono_tz::EST.from_local_datetime(&target2).unwrap();
+
+    let next_ssr =
+        find_next_solunar_utc_dt(0, 244.63140570, 1, false, target_dt2.with_timezone(&Utc));
+    println!("{}", next_ssr);
     close_dll();
 }

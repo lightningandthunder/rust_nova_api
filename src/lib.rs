@@ -1,11 +1,12 @@
 mod utils;
 
 use anyhow::{anyhow, Result};
-use chrono::{DateTime, Datelike, NaiveDate, TimeZone, Timelike, Utc};
+use chrono::{DateTime, Datelike, Days, NaiveDate, TimeZone, Timelike, Utc, TimeDelta};
 use chrono_tz::Tz;
 use libc::{c_char, c_int, c_longlong};
 use phf::phf_map;
 use std::collections::HashMap;
+use std::ops::Add;
 
 use reverse_geocoder::{ReverseGeocoder, SearchResult};
 use std::ffi::{c_double, CString};
@@ -259,6 +260,46 @@ fn get_orb(coord1: f64, coord2: f64, low_bound: f64, high_bound: f64) -> Option<
     None
 }
 
+fn get_orb_signed(base_coord: f64, reference_coord: f64, low_bound: f64, high_bound: f64) -> Option<f64> {
+    let aspect_average = (low_bound + high_bound) / 2.0;
+    let raw_orb = base_coord - reference_coord;
+    let aspect = f64::abs(raw_orb);
+
+    let aspect_average = (low_bound + high_bound) / 2.0;
+    let aspect = f64::abs(base_coord - reference_coord);
+
+    // If one longitude is near 360º and the other is near 0º
+    let aspect360 = f64::abs(aspect - 360.0);
+
+    if low_bound <= aspect && aspect <= high_bound {
+        return match low_bound as i32 {
+            0 => match raw_orb < 0.0 {
+                true =>  Some(aspect * -1.0),
+                false => Some(aspect),
+            },
+            _ => match raw_orb < 0.0 {
+                true => Some(f64::abs(aspect - aspect_average) * -1.0),
+                false => Some(f64::abs(aspect - aspect_average)),
+            },
+        };
+    }
+
+    if low_bound <= aspect360 && aspect360 <= high_bound {
+        return match low_bound as i32 {
+            0 => match raw_orb < 0.0 {
+                true => Some(aspect360 * -1.0),
+                false => Some(aspect360),
+            },
+            _ => match raw_orb < 0.0 {
+                true => Some(f64::abs(aspect360 - aspect_average) * -1.0),
+                false => Some(f64::abs(aspect360 - aspect_average)),
+            },
+        };
+    }
+
+    None
+}
+
 fn calculate_angles(julian_day: f64, longitude: f64, latitude: f64) -> ([f64; 13], [f64; 10]) {
     let mut cusps: [f64; 13] = Default::default();
     let mut angles: [f64; 10] = Default::default();
@@ -413,7 +454,59 @@ pub fn find_next_solunar_utc_dt(
     radix_position: f64,
     harmonic: i8,
     time_reverse: bool,
-) {
+    base_dt: DateTime<Utc>,
+) -> DateTime<Utc> {
+    let mut closest_approach_orb = 359.0;
+
+    let mut test_dt = base_dt.checked_add_days(Days::new(1)).unwrap().with_hour(0).unwrap();
+    let mut julian_day = get_julian_day(test_dt);
+    let mut transiting_data = calculate_planets_ut(julian_day, body_number).unwrap();
+
+    // Search by day - will eventually do as a binary search
+    loop {
+        match get_orb_signed(radix_position, transiting_data[0], 0.0, 5.0) {
+            Some(current_orb) => {
+                // If we were closer before and went past
+                if current_orb < 0.0 {
+                    test_dt = test_dt.checked_sub_days(Days::new(1)).unwrap();
+                    julian_day = get_julian_day(test_dt);
+                    transiting_data = calculate_planets_ut(julian_day, body_number).unwrap();
+                    break;
+                }
+                test_dt = test_dt.checked_add_days(Days::new(1)).unwrap();
+                julian_day = get_julian_day(test_dt);
+                transiting_data = calculate_planets_ut(julian_day, body_number).unwrap();
+            }
+            None => {
+                test_dt = test_dt.checked_add_days(Days::new(1)).unwrap();
+                julian_day = get_julian_day(test_dt);
+                transiting_data = calculate_planets_ut(julian_day, body_number).unwrap();
+            },
+        };
+    }
+
+    // Search by second - will eventually do as a binary search
+    loop {
+        match get_orb_signed(radix_position, transiting_data[0], 0.0, 5.0) {
+            Some(current_orb) => {
+                // If we were closer before and went past
+                if current_orb < 0.0 {
+                    test_dt = test_dt.add(TimeDelta::new(-1, 0).unwrap());
+                    break;
+                }
+                test_dt = test_dt.add(TimeDelta::new(1, 0).unwrap());
+                julian_day = get_julian_day(test_dt);
+                transiting_data = calculate_planets_ut(julian_day, body_number).unwrap();
+            }
+            None => {
+                test_dt = test_dt.add(TimeDelta::new(1, 0).unwrap());
+                julian_day = get_julian_day(test_dt);
+                transiting_data = calculate_planets_ut(julian_day, body_number).unwrap();
+            },
+        };
+    }
+
+    test_dt
 }
 
 pub fn angular_precessed_planets_in_range(
