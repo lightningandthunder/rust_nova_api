@@ -1,5 +1,5 @@
 [package]
-name = "nova-rust"
+name = "angular-planet-finder"
 version = "0.1.0"
 edition = "2021"
 
@@ -24,3 +24,4 @@ reverse_geocoder = "4.0.0"
 serde = "1.0.196"
 tokio = "1.36.0"
 tzf-rs = "0.4.5"
+nova_rust = { path = "../" }

@@ -1,19 +1,24 @@
-mod utils;
+pub mod spacetime_utils;
+pub mod structs;
+pub mod utils;
 
 use anyhow::{anyhow, Result};
-use chrono::{DateTime, Datelike, Days, NaiveDate, TimeZone, Timelike, Utc, TimeDelta};
+use chrono::{DateTime, Datelike, Days, NaiveDate, TimeDelta, TimeZone, Timelike, Utc};
 use chrono_tz::Tz;
 use libc::{c_char, c_int, c_longlong};
 use phf::phf_map;
 use std::collections::HashMap;
 use std::ops::Add;
+use crate::structs::{
+    AngularityOrb, CoordinateSystemValues, Location, MeasuringFramework, Planet,
+    SiderealContext,
+};
 
 use reverse_geocoder::{ReverseGeocoder, SearchResult};
 use std::ffi::{c_double, CString};
-use std::fmt;
-use std::ptr;
+use std::{fmt, ptr};
 
-use crate::utils::{
+use utils::{
     calculate_prime_vertical_longitude, calculate_right_ascension, parse_angularity_longitude,
     parse_angularity_pvl, parse_angularity_ra,
 };
@@ -28,7 +33,7 @@ const ZODIAC: [&'static str; 12] = [
     "Ari", "Tau", "Gem", "Can", "Leo", "Vir", "Lib", "Sco", "Sag", "Cap", "Aqu", "Pis",
 ];
 
-const PLANET_TO_INT: phf::Map<&'static str, i32> = phf_map! {
+pub const PLANET_TO_INT: phf::Map<&'static str, i32> = phf_map! {
         "Sun" => 0,
         "Moon" => 1,
         "Mercury" => 2,
@@ -48,6 +53,11 @@ const PLANET_TO_INT: phf::Map<&'static str, i32> = phf_map! {
         "Makemake" => 146472,
         "Gonggong" => 235088,
 };
+
+pub const PLANET_NAMES: [&'static str; 17] = [
+    "Sun", "Moon", "Mercury", "Venus", "Mars", "Jupiter", "Saturn", "Uranus", "Neptune", "Pluto",
+    "Quaoar", "Sedna", "Orcus", "Haumea", "Eris", "Makemake", "Gonggong",
+];
 
 fn body_is_tno(body_number: i32) -> bool {
     [60000, 100377, 100482, 146108, 146472, 146199, 235088].contains(&body_number)
@@ -101,95 +111,6 @@ extern "C" {
         first_cusp: *mut c_double,
         first_angle: *mut c_double,
     );
-}
-
-#[derive(Debug, PartialEq)]
-pub struct CoordinateSystemValues {
-    pub longitude: f64,
-    pub latitude: f64,
-    pub speed_in_longitude: f64,
-    pub right_ascension: f64,
-    pub prime_vertical_longitude: f64,
-    pub azimuth: f64,
-    pub meridian_longitude: f64, // This is experimental
-}
-
-#[derive(Debug, PartialEq)]
-pub struct Planet {
-    pub name: String,
-    pub body_number: i32,
-    pub coordinates: CoordinateSystemValues,
-}
-
-#[repr(C)]
-pub union FlexibleDatetime {
-    pub utc_datetime: DateTime<Utc>,
-    pub local_datetime: DateTime<Tz>,
-}
-
-impl std::fmt::Debug for FlexibleDatetime {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        unsafe {
-            match self {
-                FlexibleDatetime { utc_datetime } => write!(f, "{}", utc_datetime),
-                FlexibleDatetime { local_datetime } => write!(f, "{}", local_datetime),
-            }
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct Location {
-    pub longitude: f64,
-    pub latitude: f64,
-    pub datetime: FlexibleDatetime,
-    pub name: String,
-}
-
-#[derive(Debug)]
-pub enum MeasuringFramework {
-    Longitude,
-    RightAscension,
-    PrimeVerticalLongitude,
-    Azimuth,
-    MeridianLongitude,
-}
-
-impl fmt::Display for MeasuringFramework {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Debug::fmt(self, f)
-    }
-}
-
-#[derive(Debug)]
-pub struct AngularityOrb {
-    pub planet: String,
-    pub framework: MeasuringFramework,
-    pub orb: f64,
-}
-
-#[derive(Debug)]
-pub struct AngularLocation {
-    location: Location,
-    planets: Vec<AngularityOrb>,
-}
-
-#[derive(Debug)]
-pub struct SiderealContext {
-    pub lst: f64,
-    pub ramc: f64,
-    pub obliquity: f64,
-    pub svp: f64,
-    pub datetime: DateTime<Utc>,
-    pub julian_day: f64,
-    pub location: Location,
-}
-
-pub struct CoordinateRange {
-    pub min_latitude: i32,
-    pub max_latitude: i32,
-    pub min_longitude: i32,
-    pub max_longitude: i32,
 }
 
 pub fn open_dll() {
@@ -260,7 +181,12 @@ fn get_orb(coord1: f64, coord2: f64, low_bound: f64, high_bound: f64) -> Option<
     None
 }
 
-fn get_orb_signed(base_coord: f64, reference_coord: f64, low_bound: f64, high_bound: f64) -> Option<f64> {
+fn get_orb_signed(
+    base_coord: f64,
+    reference_coord: f64,
+    low_bound: f64,
+    high_bound: f64,
+) -> Option<f64> {
     let aspect_average = (low_bound + high_bound) / 2.0;
     let raw_orb = base_coord - reference_coord;
     let aspect = f64::abs(raw_orb);
@@ -274,7 +200,7 @@ fn get_orb_signed(base_coord: f64, reference_coord: f64, low_bound: f64, high_bo
     if low_bound <= aspect && aspect <= high_bound {
         return match low_bound as i32 {
             0 => match raw_orb < 0.0 {
-                true =>  Some(aspect * -1.0),
+                true => Some(aspect * -1.0),
                 false => Some(aspect),
             },
             _ => match raw_orb < 0.0 {
@@ -458,7 +384,11 @@ pub fn find_next_solunar_utc_dt(
 ) -> DateTime<Utc> {
     let mut closest_approach_orb = 359.0;
 
-    let mut test_dt = base_dt.checked_add_days(Days::new(1)).unwrap().with_hour(0).unwrap();
+    let mut test_dt = base_dt
+        .checked_add_days(Days::new(1))
+        .unwrap()
+        .with_hour(0)
+        .unwrap();
     let mut julian_day = get_julian_day(test_dt);
     let mut transiting_data = calculate_planets_ut(julian_day, body_number).unwrap();
 
@@ -481,7 +411,7 @@ pub fn find_next_solunar_utc_dt(
                 test_dt = test_dt.checked_add_days(Days::new(1)).unwrap();
                 julian_day = get_julian_day(test_dt);
                 transiting_data = calculate_planets_ut(julian_day, body_number).unwrap();
-            },
+            }
         };
     }
 
@@ -502,7 +432,7 @@ pub fn find_next_solunar_utc_dt(
                 test_dt = test_dt.add(TimeDelta::new(1, 0).unwrap());
                 julian_day = get_julian_day(test_dt);
                 transiting_data = calculate_planets_ut(julian_day, body_number).unwrap();
-            },
+            }
         };
     }
 
@@ -512,10 +442,8 @@ pub fn find_next_solunar_utc_dt(
 pub fn angular_precessed_planets_in_range(
     radix_dt: DateTime<Tz>,
     target_dt: DateTime<Tz>,
-    range: CoordinateRange,
-    skip_malefics: bool,
-    skip_tnos: bool,
-    benefics_only: bool,
+    range: crate::structs::CoordinateRange,
+    allowed_body_numbers: Vec<i32>,
 ) -> Result<HashMap<String, Vec<AngularityOrb>>> {
     let mut angular_locations: HashMap<String, Vec<AngularityOrb>> = HashMap::new();
 
@@ -555,10 +483,7 @@ pub fn angular_precessed_planets_in_range(
     for longitude in range.min_longitude..=range.max_longitude {
         for latitude in range.min_latitude..=range.max_latitude {
             for planet in &radix_positions {
-                if (skip_tnos && body_is_tno(planet.body_number))
-                    || (skip_malefics && body_is_malefic(planet.body_number))
-                    || (benefics_only && !body_is_benefic(planet.body_number))
-                {
+                if !allowed_body_numbers.contains(&planet.body_number) {
                     continue;
                 }
 
