@@ -8,22 +8,25 @@ use dialoguer::{
 use dotenv::dotenv;
 use nova_rust::{
     angular_precessed_planets_in_range, close_dll, create_sidereal_context,
-    find_next_solunar_utc_dt, open_dll, PLANET_NAMES, PLANET_TO_INT
+    find_next_solunar_utc_dt, open_dll, PLANET_NAMES, PLANET_TO_INT,
 };
 
-use nova_rust::{spacetime_utils::{geocode, local_to_utc, naive_to_local_tz, string_to_naive_date, string_to_naive_datetime}, structs::CoordinateRange};
+use nova_rust::{
+    spacetime_utils::{
+        geocode, local_to_utc, naive_to_local_tz, string_to_naive_date, string_to_naive_datetime,
+    },
+    structs::CoordinateRange,
+};
 
 #[derive(Debug)]
 struct InputConfig {
     title: String,
     local_birth_dt: DateTime<Tz>,
     birth_coordinates: (f64, f64),
-    target_planet_name: String,
+    target_planet_number: i32,
     harmonic: i32,
-    // Will need to add 0 H/M/S to this
     solunar_dt: DateTime<Tz>,
     allowed_body_numbers: Vec<i32>,
-    // Will need to convert to f64 if no decimal point is present
     orb: f64,
 }
 
@@ -83,18 +86,16 @@ fn get_natal_precession_input() -> anyhow::Result<Option<InputConfig>, Box<dyn s
 
     let local_birth_dt = naive_to_local_tz(birth_time, birth_coordinates.0, birth_coordinates.1)?;
 
+    println!("local birth dt: {}", local_birth_dt);
+
     // Ask for target planet
-    let target_planet_int: usize = Select::with_theme(&theme)
+    let target_planet_number: i32 = Select::with_theme(&theme)
         .with_prompt("Please select a planet to find a return for")
         .default(0)
         .item("Sun")
         .item("Moon")
-        .interact()?;
-
-    let target_planet_name = match target_planet_int {
-        0 => "Sun".to_string(),
-        _ => "Moon".to_string(),
-    };
+        .interact()?
+        .try_into()?;
 
     // Ask for harmonic
     let harmonic_raw: String = Input::with_theme(&theme)
@@ -110,7 +111,11 @@ fn get_natal_precession_input() -> anyhow::Result<Option<InputConfig>, Box<dyn s
 
     let solunar_start_date = string_to_naive_date(target_date_raw)?;
 
-    let solunar_dt = naive_to_local_tz(solunar_start_date.and_hms_opt(0, 0, 0).unwrap(), birth_coordinates.0, birth_coordinates.1)?;
+    let solunar_dt = naive_to_local_tz(
+        solunar_start_date.and_hms_opt(0, 0, 0).unwrap(),
+        birth_coordinates.0,
+        birth_coordinates.1,
+    )?;
 
     // Select allowed planets
     let planet_defaults = [
@@ -151,20 +156,18 @@ fn get_natal_precession_input() -> anyhow::Result<Option<InputConfig>, Box<dyn s
     // Select orb
     let orb_raw: String = Input::with_theme(&theme)
         .with_prompt(
-            "Please enter the orb to allow for angular planets as a decimal, e.g. 1.0 or 2.5",
+            "Please enter the orb to allow for angular planets, e.g. 1 or 2.5",
         )
         .default("3.0".to_string())
         .interact()?;
 
     let orb: f64 = orb_raw.parse().unwrap();
 
-    println!("{:?}", String::from("3").parse::<f64>());
-
     Ok(Some(InputConfig {
         title,
         local_birth_dt,
         birth_coordinates,
-        target_planet_name,
+        target_planet_number,
         harmonic,
         solunar_dt,
         allowed_body_numbers,
@@ -178,17 +181,28 @@ fn main() {
     open_dll();
 
     let range = CoordinateRange {
-        min_longitude: -125,
-        max_longitude: -66,
-        min_latitude: 30,
-        max_latitude: 48,
+        min_longitude: -120,
+        max_longitude: -70,
+        min_latitude: 35,
+        max_latitude: 42,
     };
 
     let config = get_natal_precession_input().unwrap().unwrap();
-    println!("{:?}", config);
 
-    let r = angular_precessed_planets_in_range(config.local_birth_dt, config.solunar_dt, range, config.allowed_body_numbers).unwrap();
-    println!("{:?}", r);
+    let r = angular_precessed_planets_in_range(
+        config.local_birth_dt,
+        config.solunar_dt,
+        range,
+        config.allowed_body_numbers,
+        config.target_planet_number,
+        config.harmonic,
+        config.orb,
+    )
+    .unwrap();
+    
+    r.into_iter().for_each(| x | {
+        println!("{} {:?}", x.0, x.1);
+    });
 
     close_dll();
 }

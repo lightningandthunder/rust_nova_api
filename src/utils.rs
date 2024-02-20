@@ -13,9 +13,9 @@ pub fn dms_to_decimal(degree: i32, minute: i32, second: i32) -> f64 {
 }
 
 pub fn decimal_to_dms(decimal: f64) -> (i32, i32, i32) {
-    let degree = decimal as i32;
-    let minute = ((decimal - degree as f64) * 60.0) as i32;
-    let second = ((((decimal - degree as f64) * 60.0) - (minute as f64)) * 60.0) as i32;
+    let degree = i32::abs(decimal as i32);
+    let minute = i32::abs(((decimal - degree as f64) * 60.0) as i32);
+    let second = i32::abs(((((decimal - degree as f64) * 60.0) - (minute as f64)) * 60.0) as i32);
     (degree, minute, second)
 }
 
@@ -104,22 +104,29 @@ pub fn calculate_right_ascension(
     precessed_right_ascension
 }
 
-pub fn parse_angularity_pvl(pvl: f64) -> Option<f64> {
+pub fn parse_angularity_pvl(pvl: f64, orb: f64) -> Option<f64> {
+    let orb_int = orb as i64;
     match pvl as i64 {
-        0..=3 => Some(3.0 - pvl),
-        357..=360 => Some(360.0 - pvl),
-        87..=93 => Some(f64::abs(90.0 - pvl)),
-        177..=183 => Some(f64::abs(180.0 - pvl)),
-        267..=273 => Some(f64::abs(270.0 - pvl)),
+        pvl_int if pvl_int >= 0 && pvl_int <= 0 + orb_int => Some(f64::abs(orb - pvl)),
+        pvl_int if pvl_int >= 360 - orb_int && pvl_int <= 360 => Some(f64::abs(360.0 - pvl)),
+        pvl_int if pvl_int >= 90 - orb_int && pvl_int <= 90 + orb_int => Some(f64::abs(90.0 - pvl)),
+        pvl_int if pvl_int >= 180 - orb_int && pvl_int <= 180 + orb_int => {
+            Some(f64::abs(180.0 - pvl))
+        }
+        pvl_int if pvl_int >= 270 - orb_int && pvl_int <= 270 + orb_int => {
+            Some(f64::abs(270.0 - pvl))
+        }
         _ => None,
     }
 }
 
-pub fn parse_angularity_ra(ra: f64, ramc: f64) -> Option<f64> {
+pub fn parse_angularity_ra(ra: f64, ramc: f64, orb: f64) -> Option<f64> {
     let orb = f64::max(ra, ramc) - f64::min(ra, ramc);
+    let orb_int = orb as i64;
+
     match orb as i64 {
-        88..=90 => Some(90.0 - orb),
-        268..=270 => Some(270.0 - orb),
+        90 if orb_int >= 90 - orb_int && orb_int <= 90 + orb_int => Some(90.0 - orb),
+        270 if orb_int >= 270 - orb_int && orb_int <= 270 + orb_int => Some(270.0 - orb),
         _ => None,
     }
 }
@@ -149,4 +156,9 @@ pub fn parse_angularity_longitude(longitude: f64, asc: f64, mc: f64) -> Option<f
             _ => None,
         },
     }
+}
+
+pub fn round_to_digit(number: f64, digits: i8) -> f64 {
+    let rounding_factor = 10.0 * digits as f64;
+    (number * rounding_factor).round() / (10.0 * rounding_factor)
 }

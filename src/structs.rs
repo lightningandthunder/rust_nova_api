@@ -68,7 +68,7 @@ impl fmt::Display for MeasuringFramework {
 pub struct AngularityOrb {
     pub planet: String,
     pub framework: MeasuringFramework,
-    pub orb: f64,
+    pub orb: (i32, i32),
 }
 
 #[derive(Debug)]

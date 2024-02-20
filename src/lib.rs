@@ -13,6 +13,7 @@ use crate::structs::{
     AngularityOrb, CoordinateSystemValues, Location, MeasuringFramework, Planet,
     SiderealContext,
 };
+use crate::utils::{decimal_to_dms, round_to_digit};
 
 use reverse_geocoder::{ReverseGeocoder, SearchResult};
 use std::ffi::{c_double, CString};
@@ -444,16 +445,23 @@ pub fn angular_precessed_planets_in_range(
     target_dt: DateTime<Tz>,
     range: crate::structs::CoordinateRange,
     allowed_body_numbers: Vec<i32>,
+    body_number: i32,
+    harmonic: i32,
+    orb: f64,
 ) -> Result<HashMap<String, Vec<AngularityOrb>>> {
     let mut angular_locations: HashMap<String, Vec<AngularityOrb>> = HashMap::new();
 
-    let radix_julian_day = get_julian_day(radix_dt.with_timezone(&Utc));
-
+    let radix_utc = radix_dt.with_timezone(&Utc);
+    let radix_julian_day = get_julian_day(radix_utc);
+    let radix_positions = calculate_planets_ut(radix_julian_day, body_number)?;
     let target_utc_dt = target_dt.with_timezone(&Utc);
-    let target_julian_day = get_julian_day(target_utc_dt);
 
-    let svp = get_svp(target_julian_day)?;
-    let obliquity = get_obliquity(target_julian_day)?;
+    let solunar_dt = find_next_solunar_utc_dt(body_number, radix_positions[0], harmonic as i8, false, target_utc_dt);
+
+    let solunar_julian_day = get_julian_day(solunar_dt);
+
+    let svp = get_svp(solunar_julian_day)?;
+    let obliquity = get_obliquity(solunar_julian_day)?;
 
     let radix_positions: Vec<Planet> = PLANET_TO_INT
         .entries()
@@ -492,7 +500,7 @@ pub fn angular_precessed_planets_in_range(
                     .record
                     .to_string();
 
-                let ramc = calculate_lst(target_utc_dt, longitude as f64) * 15.0;
+                let ramc = calculate_lst(solunar_dt, longitude as f64) * 15.0;
                 let mundane_position = calculate_prime_vertical_longitude(
                     planet.coordinates.longitude,
                     planet.coordinates.latitude,
@@ -503,19 +511,20 @@ pub fn angular_precessed_planets_in_range(
                 );
 
                 let (_, angles) =
-                    calculate_angles(target_julian_day, longitude as f64, latitude as f64);
+                    calculate_angles(solunar_julian_day, longitude as f64, latitude as f64);
 
                 let asc = angles[0];
                 let mc = angles[1];
 
-                if let Some(mundane_orb) = parse_angularity_pvl(mundane_position) {
+                if let Some(mundane_orb) = parse_angularity_pvl(mundane_position, orb) {
+                    let (degree, minute, _) = decimal_to_dms(mundane_orb);
                     angular_locations
                         .entry(key.clone())
                         .or_insert_with(Vec::new)
                         .push(AngularityOrb {
                             planet: planet.name.to_string(),
                             framework: MeasuringFramework::PrimeVerticalLongitude,
-                            orb: mundane_orb,
+                            orb: (degree, minute),
                         });
                 }
 
@@ -526,27 +535,29 @@ pub fn angular_precessed_planets_in_range(
                     obliquity,
                 );
 
-                if let Some(ra_orb) = parse_angularity_ra(planet_ra, ramc) {
+                if let Some(ra_orb) = parse_angularity_ra(planet_ra, ramc, orb) {
+                    let (degree, minute, _) = decimal_to_dms(ra_orb);
                     angular_locations
                         .entry(key.clone())
                         .or_insert_with(Vec::new)
                         .push(AngularityOrb {
                             planet: planet.name.to_string(),
                             framework: MeasuringFramework::RightAscension,
-                            orb: ra_orb,
+                            orb: (degree, minute),
                         });
                 }
 
                 if let Some(longitude_orb) =
                     parse_angularity_longitude(planet.coordinates.longitude, asc, mc)
                 {
+                    let (degree, minute, _) = decimal_to_dms(longitude_orb);
                     angular_locations
                         .entry(key.clone())
                         .or_insert_with(Vec::new)
                         .push(AngularityOrb {
                             planet: planet.name.to_string(),
                             framework: MeasuringFramework::Longitude,
-                            orb: longitude_orb,
+                            orb: (degree, minute),
                         });
                 }
             }
