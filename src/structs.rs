@@ -49,7 +49,7 @@ pub struct Location {
     pub name: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum MeasuringFramework {
     Longitude,
     RightAscension,
@@ -64,7 +64,7 @@ impl fmt::Display for MeasuringFramework {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AngularityOrb {
     pub planet: String,
     pub framework: MeasuringFramework,

@@ -59,7 +59,7 @@ pub fn geocode(address: &String) -> anyhow::Result<Option<(f64, f64)>> {
 
     // Must be done after actually doing a geocoding call
     println!(
-        "Geocoding calls remaining: {:?}",
+        "Geocoding calls remaining for next 24 hours (across all users): {:?}",
         oc.remaining_calls().unwrap_or(0),
     );
 

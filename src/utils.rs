@@ -105,28 +105,20 @@ pub fn calculate_right_ascension(
 }
 
 pub fn parse_angularity_pvl(pvl: f64, orb: f64) -> Option<f64> {
-    let orb_int = orb as i64;
-    match pvl as i64 {
-        pvl_int if pvl_int >= 0 && pvl_int <= 0 + orb_int => Some(f64::abs(orb - pvl)),
-        pvl_int if pvl_int >= 360 - orb_int && pvl_int <= 360 => Some(f64::abs(360.0 - pvl)),
-        pvl_int if pvl_int >= 90 - orb_int && pvl_int <= 90 + orb_int => Some(f64::abs(90.0 - pvl)),
-        pvl_int if pvl_int >= 180 - orb_int && pvl_int <= 180 + orb_int => {
-            Some(f64::abs(180.0 - pvl))
-        }
-        pvl_int if pvl_int >= 270 - orb_int && pvl_int <= 270 + orb_int => {
-            Some(f64::abs(270.0 - pvl))
-        }
+    match pvl {
+        pvl if pvl >= 0.0 && pvl <= 0.0 + orb => Some(f64::abs(orb - pvl)),
+        pvl if pvl >= 360.0 - orb && pvl <= 360.0 => Some(f64::abs(360.0 - pvl)),
+        pvl if pvl >= 90.0 - orb && pvl <= 90.0 + orb => Some(f64::abs(90.0 - pvl)),
+        pvl if pvl >= 180.0 - orb && pvl <= 180.0 + orb => Some(f64::abs(180.0 - pvl)),
+        pvl if pvl >= 270.0 - orb && pvl <= 270.0 + orb => Some(f64::abs(270.0 - pvl)),
         _ => None,
     }
 }
 
 pub fn parse_angularity_ra(ra: f64, ramc: f64, orb: f64) -> Option<f64> {
-    let orb = f64::max(ra, ramc) - f64::min(ra, ramc);
-    let orb_int = orb as i64;
-
-    match orb as i64 {
-        90 if orb_int >= 90 - orb_int && orb_int <= 90 + orb_int => Some(90.0 - orb),
-        270 if orb_int >= 270 - orb_int && orb_int <= 270 + orb_int => Some(270.0 - orb),
+    match f64::abs(ra - ramc) {
+        orb_ra if orb_ra >= 90.0 - orb && orb_ra <= 90.0 + orb => Some(f64::abs(90.0 - orb_ra)),
+        orb_ra if orb_ra >= 270.0 - orb && orb_ra <= 270.0 + orb => Some(f64::abs(270.0 - orb_ra)),
         _ => None,
     }
 }

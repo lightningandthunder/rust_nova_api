@@ -2,6 +2,10 @@ pub mod spacetime_utils;
 pub mod structs;
 pub mod utils;
 
+use crate::structs::{
+    AngularityOrb, CoordinateSystemValues, Location, MeasuringFramework, Planet, SiderealContext,
+};
+use crate::utils::{decimal_to_dms, round_to_digit};
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Datelike, Days, NaiveDate, TimeDelta, TimeZone, Timelike, Utc};
 use chrono_tz::Tz;
@@ -9,11 +13,6 @@ use libc::{c_char, c_int, c_longlong};
 use phf::phf_map;
 use std::collections::HashMap;
 use std::ops::Add;
-use crate::structs::{
-    AngularityOrb, CoordinateSystemValues, Location, MeasuringFramework, Planet,
-    SiderealContext,
-};
-use crate::utils::{decimal_to_dms, round_to_digit};
 
 use reverse_geocoder::{ReverseGeocoder, SearchResult};
 use std::ffi::{c_double, CString};
@@ -440,6 +439,31 @@ pub fn find_next_solunar_utc_dt(
     test_dt
 }
 
+fn sorted_angular_planets_by_orb(angular_planets: Vec<AngularityOrb>) -> Vec<AngularityOrb> {
+    let mut sorted_angular_planets = angular_planets;
+    sorted_angular_planets.sort_by(|a, b| {
+        let a_orb = a.orb.0 as f64 + a.orb.1 as f64 / 60.0;
+        let b_orb = b.orb.0 as f64 + b.orb.1 as f64 / 60.0;
+        a_orb.partial_cmp(&b_orb).unwrap()
+    });
+
+    sorted_angular_planets
+}
+
+fn sort_list_of_angularities_by_closest_orb(
+    angularities: HashMap<String, Vec<AngularityOrb>>,
+) -> Vec<(String, Vec<AngularityOrb>)> {
+    let mut sorted_angularities: Vec<(String, Vec<AngularityOrb>)> =
+        angularities.into_iter().collect();
+    sorted_angularities.sort_by(|a, b| {
+        let a_orb = a.1[0].orb.0 as f64 + a.1[0].orb.1 as f64 / 60.0;
+        let b_orb = b.1[0].orb.0 as f64 + b.1[0].orb.1 as f64 / 60.0;
+        a_orb.partial_cmp(&b_orb).unwrap()
+    });
+
+    sorted_angularities
+}
+
 pub fn angular_precessed_planets_in_range(
     radix_dt: DateTime<Tz>,
     target_dt: DateTime<Tz>,
@@ -448,7 +472,7 @@ pub fn angular_precessed_planets_in_range(
     body_number: i32,
     harmonic: i32,
     orb: f64,
-) -> Result<HashMap<String, Vec<AngularityOrb>>> {
+) -> Result<Vec<(String, Vec<AngularityOrb>)>> {
     let mut angular_locations: HashMap<String, Vec<AngularityOrb>> = HashMap::new();
 
     let radix_utc = radix_dt.with_timezone(&Utc);
@@ -456,7 +480,13 @@ pub fn angular_precessed_planets_in_range(
     let radix_positions = calculate_planets_ut(radix_julian_day, body_number)?;
     let target_utc_dt = target_dt.with_timezone(&Utc);
 
-    let solunar_dt = find_next_solunar_utc_dt(body_number, radix_positions[0], harmonic as i8, false, target_utc_dt);
+    let solunar_dt = find_next_solunar_utc_dt(
+        body_number,
+        radix_positions[0],
+        harmonic as i8,
+        false,
+        target_utc_dt,
+    );
 
     let solunar_julian_day = get_julian_day(solunar_dt);
 
@@ -564,5 +594,16 @@ pub fn angular_precessed_planets_in_range(
         }
     }
 
-    Ok(angular_locations)
+    let mut sorted_angular_locations = angular_locations.clone();
+
+    // Sort the angular planets by closest orb
+    for (location, angular_planets) in angular_locations.iter() {
+        let sorted_angular_planets: Vec<AngularityOrb> =
+            sorted_angular_planets_by_orb(angular_planets.to_vec());
+        sorted_angular_locations.insert(location.to_string(), sorted_angular_planets);
+    }
+
+    let fully_sorted_locations = sort_list_of_angularities_by_closest_orb(sorted_angular_locations);
+
+    Ok(fully_sorted_locations)
 }
