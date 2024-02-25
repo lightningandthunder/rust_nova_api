@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, path::Display};
 
 use chrono::{
     DateTime, Datelike, Days, LocalResult, NaiveDate, NaiveDateTime, TimeDelta, TimeZone, Timelike,
@@ -71,10 +71,56 @@ pub struct AngularityOrb {
     pub orb: (i32, i32),
 }
 
-#[derive(Debug)]
+impl AngularityOrb {
+    pub fn pretty_print(&self) -> String {
+        format!(
+            "{} {}° {}' ({})",
+            self.planet, self.orb.0, self.orb.1, self.framework
+        )
+    }
+}
+
+impl fmt::Display for AngularityOrb {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{} {}° {}' ({})",
+            self.planet, self.orb.0, self.orb.1, self.framework,
+        )
+    }
+}
+
+pub struct Angularities {
+    pub planets: Vec<AngularityOrb>,
+}
+
+impl fmt::Display for Angularities {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let planet_string = self
+            .planets
+            .iter()
+            .map(|p| p.pretty_print())
+            .collect::<Vec<String>>()
+            .join(", ");
+        write!(f, "{}", planet_string)
+    }
+}
+
 pub struct AngularLocation {
     location: Location,
     planets: Vec<AngularityOrb>,
+}
+
+impl fmt::Display for AngularLocation {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let planet_string = self
+            .planets
+            .iter()
+            .map(|p| p.pretty_print())
+            .collect::<Vec<String>>()
+            .join(", ");
+        write!(f, "{}: {}", self.location.name, planet_string)
+    }
 }
 
 #[derive(Debug)]

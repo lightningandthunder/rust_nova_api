@@ -7,15 +7,11 @@ use dialoguer::{
 };
 use dotenv::dotenv;
 use nova_rust::{
-    angular_precessed_planets_in_range, close_dll, create_sidereal_context,
-    find_next_solunar_utc_dt, open_dll, PLANET_NAMES, PLANET_TO_INT,
-};
-
-use nova_rust::{
+    angular_precessed_planets_in_range, close_dll, open_dll, PLANET_NAMES, PLANET_TO_INT,
     spacetime_utils::{
         geocode, local_to_utc, naive_to_local_tz, string_to_naive_date, string_to_naive_datetime,
     },
-    structs::CoordinateRange,
+    structs::CoordinateRange, file_utils::{create_file, write_to_file},
 };
 
 #[derive(Debug)]
@@ -59,7 +55,7 @@ fn get_natal_precession_input() -> anyhow::Result<Option<InputConfig>, Box<dyn s
 
     // Ask for birth date
     let birth_datetime_raw: String = Input::with_theme(&theme)
-        .with_prompt("Please enter your birth date and time in this format: MM/DD/YYYY HH:MM am")
+        .with_prompt("Please enter your birth date and time in this format: MM/DD/YYYY HH:MM am/pm. For example: 01/01/2000 12:00pm.")
         .interact()?;
 
     let birth_time = string_to_naive_datetime(birth_datetime_raw)?;
@@ -72,7 +68,7 @@ fn get_natal_precession_input() -> anyhow::Result<Option<InputConfig>, Box<dyn s
     let geocoded_coords = geocode(&birth_location)?;
     let birth_coordinates = match geocoded_coords {
         Some(coords) => {
-            let prompt = format!("These coordinates were found for your birth location: {:?}. Enter Y to accept or N to enter your own coordinates.", coords);
+            let prompt = format!("These coordinates were found for your birth location: {:?}.\nEnter Y to accept or N to enter your own coordinates.", coords);
             let use_geocoded_coordinates =
                 Confirm::with_theme(&theme).with_prompt(prompt).interact()?;
 
@@ -85,8 +81,6 @@ fn get_natal_precession_input() -> anyhow::Result<Option<InputConfig>, Box<dyn s
     };
 
     let local_birth_dt = naive_to_local_tz(birth_time, birth_coordinates.0, birth_coordinates.1)?;
-
-    println!("local birth dt: {}", local_birth_dt);
 
     // Ask for target planet
     let target_planet_number: i32 = Select::with_theme(&theme)
@@ -105,8 +99,9 @@ fn get_natal_precession_input() -> anyhow::Result<Option<InputConfig>, Box<dyn s
     let harmonic: i32 = harmonic_raw.parse().unwrap();
 
     // Ask for date after which to find the next return
+    println!("Please enter the date after which to find the next return. The first solunar return found after this date will be used.");
     let target_date_raw: String = Input::with_theme(&theme)
-        .with_prompt("Please enter the target date to search after in this format: MM/DD/YYYY")
+        .with_prompt("Entry format: MM/DD/YYYY")
         .interact()?;
 
     let solunar_start_date = string_to_naive_date(target_date_raw)?;
@@ -200,9 +195,13 @@ fn main() {
     )
     .unwrap();
     
+    let mut file = create_file(&config.title).unwrap();
+
     r.into_iter().for_each(| x | {
-        println!("{} {:?}", x.0, x.1);
+        write_to_file(&mut file, format!("{}: {}\n", x.0, x.1)).unwrap();
     });
+
+    println!("Report written to {}.txt. Please check the current directory for your output file.", &config.title);
 
     close_dll();
 }
