@@ -1,9 +1,16 @@
+use std::env;
+use std::path::PathBuf;
+
 fn main() {
-       // Specify the path where to find the native library
-       println!("cargo:rustc-link-search=native=/home/mike/projects/nova-rust/src/swe/dll/");
+    let target = env::var("TARGET").unwrap();
+    let current_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
 
-       // Specify the native library name
-       println!("cargo:rustc-link-lib=swe");
+    let lib_dir = PathBuf::from(&current_dir).join("src/swe/dll/");
+    let lib_dir_str = lib_dir.to_str().unwrap();
 
-       println!("cargo:rustc-link-arg=-Wl,-rpath,/home/mike/projects/nova-rust/src/swe/dll/");
+    println!("cargo:rustc-link-search=native={}", lib_dir_str);
+
+    println!("cargo:rustc-link-lib=swe");
+
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib_dir_str);
 }
