@@ -60,7 +60,7 @@ pub struct Location {
     pub name: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum MeasuringFramework {
     Longitude,
     RightAscension,

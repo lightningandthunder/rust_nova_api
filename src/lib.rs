@@ -590,7 +590,7 @@ pub fn angular_precessed_planets_in_range(
                 }
 
                 if let Some(longitude_orb) =
-                    parse_angularity_longitude(planet.coordinates.longitude, asc, mc)
+                    parse_angularity_longitude(planet.coordinates.longitude, asc, mc, orb)
                 {
                     let (degree, minute, _) = decimal_to_dms(longitude_orb);
                     angular_locations
