@@ -134,7 +134,7 @@ pub fn parse_angularity_ra(ra: f64, ramc: f64, orb: f64) -> Option<f64> {
     }
 }
 
-pub fn parse_angularity_longitude(longitude: f64, asc: f64, mc: f64) -> Option<f64> {
+pub fn parse_angularity_longitude(longitude: f64, asc: f64, mc: f64, orb: f64) -> Option<f64> {
     // normalize orbs
     let asc_orb = {
         match (longitude - asc) as i64 {
@@ -150,12 +150,12 @@ pub fn parse_angularity_longitude(longitude: f64, asc: f64, mc: f64) -> Option<f
         }
     };
 
-    match asc_orb as i64 {
-        88..=90 => Some(90.0 - asc_orb),
-        268..=270 => Some(270.0 - asc_orb),
-        _ => match mc_orb as i64 {
-            88..=90 => Some(90.0 - mc_orb),
-            268..=270 => Some(270.0 - mc_orb),
+    match asc_orb {
+        o if o >= 90.0 - orb && o <= 90.0 + orb => Some(f64::abs(90.0 - asc_orb)),
+        o if o >= 270.0 - orb && o <= 270.0 + orb => Some(f64::abs(270.0 - asc_orb)),
+        _ => match mc_orb {
+            o if o >= 90.0 - orb && o <= 90.0 + orb => Some(f64::abs(90.0 - mc_orb)),
+            o if o >= 270.0 - orb && o <= 270.0 + orb => Some(f64::abs(270.0 - mc_orb)),
             _ => None,
         },
     }

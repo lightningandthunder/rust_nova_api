@@ -13,7 +13,7 @@ use std::fs::File;
 use std::io::prelude::*;
 
 pub fn create_file(title: &str) -> anyhow::Result<File> {
-    let mut file = File::create(format!("{}.txt", title))?;
+    let mut file = File::create(format!("{}", title))?;
     Ok(file)
 }
 
