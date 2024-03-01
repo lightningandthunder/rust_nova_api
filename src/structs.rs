@@ -75,7 +75,7 @@ impl fmt::Display for MeasuringFramework {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AngularityOrb {
     pub planet: String,
     pub framework: MeasuringFramework,

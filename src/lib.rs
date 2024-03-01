@@ -6,13 +6,13 @@ Nova Rust is free software: you can redistribute it and/or modify it under the t
 
 Nova Rust is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more details.
 
-You should have received a copy of the GNU Affero General Public License along with Foobar. If not, see <https://www.gnu.org/licenses/>. 
+You should have received a copy of the GNU Affero General Public License along with Foobar. If not, see <https://www.gnu.org/licenses/>.
 */
 
+pub mod file_utils;
 pub mod spacetime_utils;
 pub mod structs;
 pub mod utils;
-pub mod file_utils;
 
 use crate::structs::{
     AngularityOrb, CoordinateSystemValues, Location, MeasuringFramework, Planet, SiderealContext,
@@ -460,9 +460,23 @@ fn sorted_angular_planets_by_orb(angular_planets: Vec<AngularityOrb>) -> Angular
         a_orb.partial_cmp(&b_orb).unwrap()
     });
 
-    Angularities {
-        planets: sorted_angular_planets,
-    }
+    // Take only the closest orb for each planet
+    let planets =
+        sorted_angular_planets
+            .iter()
+            .fold(Vec::<AngularityOrb>::new(), |mut acc, angularity| {
+                if !acc.iter().any(|a| a.planet == angularity.planet) {
+                    let x = AngularityOrb {
+                        planet: angularity.planet.clone(),
+                        framework: angularity.framework.clone(),
+                        orb: angularity.orb,
+                    };
+                    acc.push(x);
+                }
+                acc
+            });
+
+    Angularities { planets }
 }
 
 fn sort_list_of_angularities_by_closest_orb(
@@ -610,10 +624,12 @@ pub fn angular_precessed_planets_in_range(
 
     // Sort the angular planets by closest orb
     for (location, angular_planets) in angular_locations.iter() {
-        let sorted_angular_planets: Angularities = sorted_angular_planets_by_orb(angular_planets.clone());
+        let sorted_angular_planets: Angularities =
+            sorted_angular_planets_by_orb(angular_planets.clone());
         sorted_angular_locations.insert(location.to_string(), sorted_angular_planets);
     }
 
+    // What I should do here is only take the closest orb for each planet
     let fully_sorted_locations = sort_list_of_angularities_by_closest_orb(sorted_angular_locations);
 
     Ok(fully_sorted_locations)
