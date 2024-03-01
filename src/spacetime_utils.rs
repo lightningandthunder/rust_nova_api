@@ -6,7 +6,7 @@ Nova Rust is free software: you can redistribute it and/or modify it under the t
 
 Nova Rust is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more details.
 
-You should have received a copy of the GNU Affero General Public License along with Foobar. If not, see <https://www.gnu.org/licenses/>. 
+You should have received a copy of the GNU Affero General Public License along with Foobar. If not, see <https://www.gnu.org/licenses/>.
 */
 
 use anyhow::anyhow;
@@ -23,6 +23,8 @@ use tzf_rs::DefaultFinder;
 lazy_static! {
     static ref FINDER: DefaultFinder = DefaultFinder::new();
 }
+
+const API_KEY: &str = include_str!("../.env");
 
 pub fn get_tz_name(longitude: f64, latitude: f64) -> String {
     FINDER.get_tz_name(longitude, latitude).to_string()
@@ -59,8 +61,7 @@ pub fn local_to_utc(
 
 // TODO - need to throw this into a tokio::spawn thread or something
 pub fn geocode(address: &String) -> anyhow::Result<Option<(f64, f64)>> {
-    let token = std::env::var("OPENCAGE_API_TOKEN")?;
-    let oc = Opencage::new(token);
+    let oc = Opencage::new(API_KEY.to_string());
     let res: Result<Vec<Point<f64>>, GeocodingError> = oc.forward(&address);
 
     if let Err(e) = &res {
