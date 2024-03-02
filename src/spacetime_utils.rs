@@ -24,8 +24,6 @@ lazy_static! {
     static ref FINDER: DefaultFinder = DefaultFinder::new();
 }
 
-const API_KEY: &str = include_str!("../.env");
-
 pub fn get_tz_name(longitude: f64, latitude: f64) -> String {
     FINDER.get_tz_name(longitude, latitude).to_string()
 }
@@ -60,8 +58,8 @@ pub fn local_to_utc(
 }
 
 // TODO - need to throw this into a tokio::spawn thread or something
-pub fn geocode(address: &String) -> anyhow::Result<Option<(f64, f64)>> {
-    let oc = Opencage::new(API_KEY.to_string());
+pub fn geocode(address: String, api_key: String) -> anyhow::Result<Option<(f64, f64)>> {
+    let oc = Opencage::new(api_key);
     let res: Result<Vec<Point<f64>>, GeocodingError> = oc.forward(&address);
 
     if let Err(e) = &res {
