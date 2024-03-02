@@ -127,7 +127,13 @@ extern "C" {
 }
 
 pub fn open_dll() {
-    let path = "/home/mike/projects/nova_go_api/src/swe/ephemeris";
+    let current_dir = std::env::current_dir().unwrap();
+    let path = current_dir
+        .join("swe")
+        .join("ephemeris")
+        .as_os_str()
+        .to_string_lossy()
+        .to_string();
     let c_str = CString::new(path).expect("CString::new failed");
     let c_str_ptr = c_str.as_ptr();
     unsafe {
@@ -159,13 +165,14 @@ fn calculate_planets_ut(julian_day: f64, body_number: i32) -> Result<Vec<f64>> {
         );
 
         let float_array: Vec<f64> = swe_array.iter().cloned().collect();
-
         let err_string = error_string_from_buffer(&err_buffer);
 
-        if err_string.is_none() {
-            Ok(float_array)
-        } else {
-            Err(anyhow!(err_string.unwrap()))
+        match err_string {
+            Ok(e_string) => match e_string {
+                Some(err) => Err(anyhow!(err)),
+                None => Ok(float_array),
+            },
+            Err(e) => Err(anyhow!(e)),
         }
     }
 }
@@ -282,15 +289,14 @@ fn convert_dms_to_decimal(degrees: f64, minutes: f64, seconds: f64) -> c_double 
     degrees + minutes / 60.0 + seconds / 3600.0
 }
 
-fn error_string_from_buffer(err_buffer: &[c_char; 256]) -> Option<String> {
-    for c in err_buffer {
-        if *c != 0 {
-            let err_cstring = unsafe { CString::from_raw(err_buffer.as_ptr() as *mut c_char) };
-            let err_string = err_cstring.to_string_lossy().into_owned();
-            return Some(err_string.trim_matches(char::from(0)).to_string());
-        }
+fn error_string_from_buffer(err_buffer: &[c_char; 256]) -> anyhow::Result<Option<String>> {
+    let err_cstring: Vec<u8> = err_buffer.iter().map(|&c| c as u8).collect();
+    let err_string = String::from_utf8(err_cstring)?;
+    let trimmed_err_string = err_string.trim_matches(char::from(0)).to_string();
+    match trimmed_err_string.len() {
+        0 => Ok(None),
+        _ => Ok(Some(trimmed_err_string)),
     }
-    None
 }
 
 fn get_julian_day_0_gmt(utc_dt: chrono::DateTime<chrono::Utc>) -> f64 {
@@ -333,11 +339,6 @@ fn get_obliquity(julian_day: f64) -> Result<f64> {
     let obliquity_array = calculate_planets_ut(julian_day, -1)?;
     Ok(obliquity_array[0])
 }
-
-// fn try_date_with_timezone(dt: NaiveDateTime, tz_string: String) -> anyhow::Result<DateTime<Tz>> {
-//     let tz: Tz = tz_string.parse().ok().unwrap()?;
-//     let result = dt.and_local_timezone(tz);
-// }
 
 pub fn create_sidereal_context(dt: DateTime<Tz>, location: Location) -> Result<SiderealContext> {
     let utc_dt = dt.with_timezone(&Utc);
@@ -394,16 +395,16 @@ pub fn find_next_solunar_utc_dt(
     harmonic: i8,
     time_reverse: bool,
     base_dt: DateTime<Utc>,
-) -> DateTime<Utc> {
+) -> anyhow::Result<DateTime<Utc>> {
     let mut closest_approach_orb = 359.0;
 
     let mut test_dt = base_dt
         .checked_add_days(Days::new(1))
-        .unwrap()
+        .ok_or_else(|| anyhow::Error::msg("No date found"))?
         .with_hour(0)
-        .unwrap();
+        .ok_or_else(|| anyhow::Error::msg("Cannot add hour 0 to date"))?;
     let mut julian_day = get_julian_day(test_dt);
-    let mut transiting_data = calculate_planets_ut(julian_day, body_number).unwrap();
+    let mut transiting_data = calculate_planets_ut(julian_day, body_number)?;
 
     // Search by day - will eventually do as a binary search
     loop {
@@ -411,19 +412,25 @@ pub fn find_next_solunar_utc_dt(
             Some(current_orb) => {
                 // If we were closer before and went past
                 if current_orb < 0.0 {
-                    test_dt = test_dt.checked_sub_days(Days::new(1)).unwrap();
+                    test_dt = test_dt
+                        .checked_sub_days(Days::new(1))
+                        .ok_or_else(|| anyhow::Error::msg("Could not subtract days"))?;
                     julian_day = get_julian_day(test_dt);
-                    transiting_data = calculate_planets_ut(julian_day, body_number).unwrap();
+                    transiting_data = calculate_planets_ut(julian_day, body_number)?;
                     break;
                 }
-                test_dt = test_dt.checked_add_days(Days::new(1)).unwrap();
+                test_dt = test_dt
+                    .checked_add_days(Days::new(1))
+                    .ok_or_else(|| anyhow::Error::msg("Could not add days"))?;
                 julian_day = get_julian_day(test_dt);
-                transiting_data = calculate_planets_ut(julian_day, body_number).unwrap();
+                transiting_data = calculate_planets_ut(julian_day, body_number)?;
             }
             None => {
-                test_dt = test_dt.checked_add_days(Days::new(1)).unwrap();
+                test_dt = test_dt
+                    .checked_add_days(Days::new(1))
+                    .ok_or_else(|| anyhow::Error::msg("Could not add days"))?;
                 julian_day = get_julian_day(test_dt);
-                transiting_data = calculate_planets_ut(julian_day, body_number).unwrap();
+                transiting_data = calculate_planets_ut(julian_day, body_number)?;
             }
         };
     }
@@ -434,22 +441,31 @@ pub fn find_next_solunar_utc_dt(
             Some(current_orb) => {
                 // If we were closer before and went past
                 if current_orb < 0.0 {
-                    test_dt = test_dt.add(TimeDelta::new(-1, 0).unwrap());
+                    test_dt = test_dt.add(
+                        TimeDelta::new(-1, 0)
+                            .ok_or_else(|| anyhow::Error::msg("Could not add timedelta"))?,
+                    );
                     break;
                 }
-                test_dt = test_dt.add(TimeDelta::new(1, 0).unwrap());
+                test_dt = test_dt.add(
+                    TimeDelta::new(1, 0)
+                        .ok_or_else(|| anyhow::Error::msg("Could not add timedelta"))?,
+                );
                 julian_day = get_julian_day(test_dt);
-                transiting_data = calculate_planets_ut(julian_day, body_number).unwrap();
+                transiting_data = calculate_planets_ut(julian_day, body_number)?;
             }
             None => {
-                test_dt = test_dt.add(TimeDelta::new(1, 0).unwrap());
+                test_dt = test_dt.add(
+                    TimeDelta::new(1, 0)
+                        .ok_or_else(|| anyhow::Error::msg("Could not add timedelta"))?,
+                );
                 julian_day = get_julian_day(test_dt);
-                transiting_data = calculate_planets_ut(julian_day, body_number).unwrap();
+                transiting_data = calculate_planets_ut(julian_day, body_number)?;
             }
         };
     }
 
-    test_dt
+    Ok(test_dt)
 }
 
 fn sorted_angular_planets_by_orb(angular_planets: Vec<AngularityOrb>) -> Angularities {
@@ -500,11 +516,12 @@ pub fn angular_precessed_planets_in_range(
     body_number: i32,
     harmonic: i32,
     orb: f64,
-) -> Result<Vec<(String, Angularities)>> {
+) -> Result<(DateTime<Tz>, Vec<(String, Angularities)>)> {
     let mut angular_locations: HashMap<String, Vec<AngularityOrb>> = HashMap::new();
 
     let radix_utc = radix_dt.with_timezone(&Utc);
     let radix_julian_day = get_julian_day(radix_utc);
+
     let radix_positions = calculate_planets_ut(radix_julian_day, body_number)?;
     let target_utc_dt = target_dt.with_timezone(&Utc);
 
@@ -514,41 +531,47 @@ pub fn angular_precessed_planets_in_range(
         harmonic as i8,
         false,
         target_utc_dt,
-    );
+    )?;
 
     let solunar_julian_day = get_julian_day(solunar_dt);
 
     let svp = get_svp(solunar_julian_day)?;
     let obliquity = get_obliquity(solunar_julian_day)?;
 
-    let radix_positions: Vec<Planet> = PLANET_TO_INT
+    let radix_positions: anyhow::Result<Vec<Planet>> = PLANET_TO_INT
         .entries()
         .into_iter()
-        .map(|(name, &body_number)| {
-            let values = calculate_planets_ut(radix_julian_day, body_number).unwrap();
-            Planet {
-                name: name.to_string(),
-                body_number,
-                coordinates: {
-                    CoordinateSystemValues {
-                        longitude: values[0],
-                        latitude: values[1],
-                        speed_in_longitude: values[2],
-                        right_ascension: 0.0,
-                        prime_vertical_longitude: 0.0,
-                        azimuth: 0.0,
-                        meridian_longitude: 0.0,
-                    }
-                },
-            }
-        })
+        .map(
+            |(name, &body_number)| match calculate_planets_ut(radix_julian_day, body_number) {
+                Ok(values) => Ok(Planet {
+                    name: name.to_string(),
+                    body_number,
+                    coordinates: {
+                        CoordinateSystemValues {
+                            longitude: values[0],
+                            latitude: values[1],
+                            speed_in_longitude: values[2],
+                            right_ascension: 0.0,
+                            prime_vertical_longitude: 0.0,
+                            azimuth: 0.0,
+                            meridian_longitude: 0.0,
+                        }
+                    },
+                }),
+                Err(e) => Err(e),
+            },
+        )
         .collect();
+
+    if radix_positions.is_err() {
+        return Err(radix_positions.err().unwrap());
+    }
 
     let geocoder = ReverseGeocoder::new();
 
     for longitude in range.min_longitude..=range.max_longitude {
         for latitude in range.min_latitude..=range.max_latitude {
-            for planet in &radix_positions {
+            for planet in radix_positions.as_ref().unwrap() {
                 if !allowed_body_numbers.contains(&planet.body_number) {
                     continue;
                 }
@@ -629,8 +652,10 @@ pub fn angular_precessed_planets_in_range(
         sorted_angular_locations.insert(location.to_string(), sorted_angular_planets);
     }
 
-    // What I should do here is only take the closest orb for each planet
     let fully_sorted_locations = sort_list_of_angularities_by_closest_orb(sorted_angular_locations);
 
-    Ok(fully_sorted_locations)
+    // Convert the solunar datetime back to local TZ
+    let radix_tz = radix_dt.timezone();
+    let local_solunar_dt = solunar_dt.with_timezone(&radix_tz);
+    Ok((local_solunar_dt, fully_sorted_locations))
 }
