@@ -3,10 +3,13 @@
 
 [package]
 name = "swiss-ephemeris-lib"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "swiss_ephemeris_lib"
+crate-type = ["rlib", "cdylib"]
+path = "src/lib.rs"
 
 [lints.rust]
 unused = "allow"
@@ -23,3 +26,7 @@ reverse_geocoder = "4.0.0"
 serde = "1.0.196"
 tokio = "1.36.0"
 tzf-rs = "0.4.5"
+
+[patch.crates-io]
+# https://github.com/sdd/kiddo/issues/154
+generator = { git = "https://github.com/Xudong-Huang/generator-rs", rev = "e3f16af" }
