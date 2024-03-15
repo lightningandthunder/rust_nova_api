@@ -129,6 +129,7 @@ extern "C" {
 pub fn open_dll() {
     let current_dir = std::env::current_dir().unwrap();
     let path = current_dir
+        .join("src")
         .join("swe")
         .join("ephemeris")
         .as_os_str()
@@ -246,7 +247,11 @@ fn get_orb_signed(
     None
 }
 
-fn calculate_angles(julian_day: f64, longitude: f64, latitude: f64) -> ([f64; 13], [f64; 10]) {
+fn calculate_cusps_and_angles(
+    julian_day: f64,
+    longitude: f64,
+    latitude: f64,
+) -> ([f64; 13], [f64; 10]) {
     let mut cusps: [f64; 13] = Default::default();
     let mut angles: [f64; 10] = Default::default();
 
@@ -262,6 +267,8 @@ fn calculate_angles(julian_day: f64, longitude: f64, latitude: f64) -> ([f64; 13
         );
     }
 
+    // cusps are numbered
+    // angles are: asc, mc, armc, vertex, "equatorial ascendant," and stuff we don't care about
     (cusps, angles)
 }
 
@@ -589,8 +596,11 @@ pub fn angular_precessed_planets_in_range(
                     latitude as f64,
                 );
 
-                let (_, angles) =
-                    calculate_angles(solunar_julian_day, longitude as f64, latitude as f64);
+                let (_, angles) = calculate_cusps_and_angles(
+                    solunar_julian_day,
+                    longitude as f64,
+                    latitude as f64,
+                );
 
                 let asc = angles[0];
                 let mc = angles[1];
@@ -658,4 +668,235 @@ pub fn angular_precessed_planets_in_range(
     let radix_tz = radix_dt.timezone();
     let local_solunar_dt = solunar_dt.with_timezone(&radix_tz);
     Ok((local_solunar_dt, fully_sorted_locations))
+}
+
+pub fn find_longitudes_for_planet_on_meridian_axis(
+    utc_dt: DateTime<Utc>,
+    body_number: i32,
+    min_longitude: i32,
+    max_longitude: i32,
+    precision: f64,
+) -> anyhow::Result<(f64, f64)> {
+    let julian_day_utc = get_julian_day(utc_dt);
+    let geo_latitude = 0.0;
+
+    let mut orb = 0.0;
+
+    // find MC; IC is just on the opposite longitude
+    let mut upper = max_longitude as f64;
+    let mut lower = min_longitude as f64;
+    let mut geo_longitude: f64 = 0.0;
+    loop {
+        if upper < lower {
+            break;
+        }
+
+        geo_longitude = (upper + lower) / 2.0;
+
+        let ramc = calculate_lst(utc_dt, geo_longitude) * 15.0;
+        let obliquity = get_obliquity(julian_day_utc)?;
+        let svp = get_svp(julian_day_utc)?;
+
+        let transiting_data = calculate_planets_ut(julian_day_utc, body_number)?;
+
+        let pvl = calculate_prime_vertical_longitude(
+            transiting_data[0],
+            transiting_data[1],
+            ramc,
+            obliquity,
+            svp,
+            geo_latitude,
+        );
+
+        orb = get_orb_signed(pvl, 270.0, 0.0, 360.0).unwrap();
+
+        // Normalize to 180º
+        orb = match orb as i32 {
+            -360..=-180 => orb + 360.0,
+            180..=360 => orb - 360.0,
+            _ => orb,
+        };
+
+        if f64::abs(orb) < precision {
+            break;
+        };
+
+        if orb < 0.0 {
+            // Go west
+            upper = geo_longitude - 0.01;
+            continue;
+        }
+
+        if orb > 0.0 {
+            // Go east
+            lower = geo_longitude + 0.01;
+            continue;
+        }
+    }
+
+    let opposite_longitude = match geo_longitude as i32 {
+        -180..=0 => 180.0 + geo_longitude,
+        _ => (180.0 - geo_longitude) * -1.0,
+    };
+
+    Ok((geo_longitude, opposite_longitude))
+}
+
+// Figure out longitudes for planet on EP/WP (square MC/IC in longitude) - this is just 90* from the ecliptical longitude of MC/IC... right?
+pub fn find_longitudes_for_planet_square_meridian(
+    utc_dt: DateTime<Utc>,
+    body_number: i32,
+    min_longitude: i32,
+    max_longitude: i32,
+    precision: f64,
+) -> anyhow::Result<(f64, f64)> {
+    let julian_day_utc = get_julian_day(utc_dt);
+    let geo_latitude = 0.0;
+
+    let mut orb = 0.0;
+
+    // find EP; WP is just on the opposite longitude
+    let mut upper = max_longitude as f64;
+    let mut lower = min_longitude as f64;
+    let mut geo_longitude: f64 = 0.0;
+    loop {
+        if upper < lower {
+            break;
+        }
+
+        geo_longitude = (upper + lower) / 2.0;
+
+        let ramc = calculate_lst(utc_dt, geo_longitude) * 15.0;
+        let obliquity = get_obliquity(julian_day_utc)?;
+        let svp = get_svp(julian_day_utc)?;
+
+        let transiting_data = calculate_planets_ut(julian_day_utc, body_number)?;
+
+        let (_, angles) = calculate_cusps_and_angles(julian_day_utc, geo_longitude, geo_latitude);
+        let mc = angles[1];
+
+        let rising_square_mc = (mc - 90.0).rem_euclid(360.0);
+
+        orb = get_orb_signed(transiting_data[0], rising_square_mc, 0.0, 360.0).unwrap();
+
+        // Normalize to 180º
+        orb = match orb as i32 {
+            -360..=-180 => orb + 360.0,
+            180..=360 => orb - 360.0,
+            _ => orb,
+        };
+
+        if f64::abs(orb) < precision {
+            break;
+        };
+
+        if orb < 0.0 {
+            // Go west
+            upper = geo_longitude - 0.01;
+            continue;
+        }
+
+        if orb > 0.0 {
+            // Go east
+            lower = geo_longitude + 0.01;
+            continue;
+        }
+    }
+
+    let opposite_longitude = match geo_longitude as i32 {
+        -180..=0 => 180.0 + geo_longitude,
+        _ => (180.0 - geo_longitude) * -1.0,
+    };
+
+    Ok((geo_longitude, opposite_longitude))
+}
+
+pub fn find_longitudes_for_planet_square_ramc(
+    utc_dt: DateTime<Utc>,
+    body_number: i32,
+    min_longitude: i32,
+    max_longitude: i32,
+    precision: f64,
+) -> anyhow::Result<(f64, f64)> {
+    let julian_day_utc = get_julian_day(utc_dt);
+    let geo_latitude = 0.0;
+
+    let mut orb = 0.0;
+
+    // find MC; IC is just on the opposite longitude
+    let mut upper = max_longitude as f64;
+    let mut lower = min_longitude as f64;
+    let mut geo_longitude: f64 = 0.0;
+    loop {
+        if upper < lower {
+            break;
+        }
+
+        geo_longitude = (upper + lower) / 2.0;
+
+        let ramc = calculate_lst(utc_dt, geo_longitude) * 15.0;
+        let obliquity = get_obliquity(julian_day_utc)?;
+        let svp = get_svp(julian_day_utc)?;
+
+        let transiting_data = calculate_planets_ut(julian_day_utc, body_number)?;
+
+        let ra = calculate_right_ascension(transiting_data[0], transiting_data[1], svp, obliquity);
+
+        let ep_a = (ramc - 90.0).rem_euclid(360.0);
+
+        orb = get_orb_signed(ra, ep_a, 0.0, 360.0).unwrap();
+
+        // Normalize to 180º
+        orb = match orb as i32 {
+            -360..=-180 => orb + 360.0,
+            180..=360 => orb - 360.0,
+            _ => orb,
+        };
+
+        if f64::abs(orb) < precision {
+            break;
+        };
+
+        if orb < 0.0 {
+            // Go west
+            upper = geo_longitude - 0.01;
+            continue;
+        }
+
+        if orb > 0.0 {
+            // Go east
+            lower = geo_longitude + 0.01;
+            continue;
+        }
+    }
+
+    let opposite_longitude = match geo_longitude as i32 {
+        -180..=0 => 180.0 + geo_longitude,
+        _ => (180.0 - geo_longitude) * -1.0,
+    };
+
+    Ok((geo_longitude, opposite_longitude))
+}
+
+// Plot out planet on horizon axis
+
+// Plot out planet square horizon axis
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn t() {
+        open_dll();
+        let dt =
+            spacetime_utils::string_to_naive_datetime("12/20/1989 10:20pm".to_string()).unwrap();
+        let utc = spacetime_utils::naive_to_utc(dt, -74.100, 40.906).unwrap();
+        let l = find_longitudes_for_planet_on_meridian_axis(utc, 3, -180, 180, 0.01);
+        // let l = find_longitudes_for_planet_square_meridian(utc, 9, -180, 180, 0.01);
+        // let l = find_longitudes_for_planet_square_ramc(utc, 5, -180, 180, 0.01);
+
+        close_dll();
+        println!("{:?}", l);
+    }
 }

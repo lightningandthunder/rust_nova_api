@@ -47,7 +47,7 @@ pub fn naive_to_local_tz(
     .map_err(|err| anyhow!("{}", err))
 }
 
-pub fn local_to_utc(
+pub fn naive_to_utc(
     local: NaiveDateTime,
     longitude: f64,
     latitude: f64,
