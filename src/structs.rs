@@ -145,6 +145,7 @@ pub struct SiderealContext {
     pub location: Location,
 }
 
+#[derive(Debug)]
 pub struct CoordinateRange {
     pub min_latitude: i32,
     pub max_latitude: i32,

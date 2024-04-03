@@ -165,3 +165,11 @@ pub fn round_to_digit(number: f64, digits: i8) -> f64 {
     let rounding_factor = 10.0 * digits as f64;
     (number * rounding_factor).round() / (10.0 * rounding_factor)
 }
+
+pub fn get_opposite_geo_longitude(longitude: f64) -> f64 {
+    match longitude as i32 {
+        -180..=0 => 180.0 + longitude,
+        _ => (180.0 - longitude) * -1.0,
+    }
+
+}
