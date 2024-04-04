@@ -11,6 +11,8 @@ You should have received a copy of the GNU Affero General Public License along w
 
 use std::f64::consts::PI;
 
+use crate::structs::CoordinateRange;
+
 pub fn radians(degrees: f64) -> f64 {
     degrees * PI / 180.0
 }
@@ -169,7 +171,23 @@ pub fn round_to_digit(number: f64, digits: i8) -> f64 {
 pub fn get_opposite_geo_longitude(longitude: f64) -> f64 {
     match longitude as i32 {
         -180..=0 => 180.0 + longitude,
-        _ => (180.0 - longitude) * -1.0,
+        _ => longitude - 180.0,
     }
 
+}
+
+pub fn clamp_results_to_range(longitude: f64, range: &CoordinateRange) -> Vec<f64> {
+    let mut results: Vec<f64> = Vec::new();
+
+    let opposite = get_opposite_geo_longitude(longitude);
+
+    if longitude > range.min_longitude as f64 && longitude < range.max_longitude as f64 {
+        results.push(longitude);
+    }
+
+    if opposite > range.min_longitude as f64 && opposite < range.max_longitude as f64 {
+        results.push(opposite);
+    }
+
+    results
 }

@@ -27,15 +27,16 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::ops::Add;
-use structs::Angularities;
+use structs::{Angularities, CoordinateRange};
 
 use reverse_geocoder::{ReverseGeocoder, SearchResult};
 use std::ffi::{c_double, CString};
 use std::{fmt, ptr};
 
 use utils::{
-    calculate_prime_vertical_longitude, calculate_right_ascension, get_opposite_geo_longitude,
-    parse_angularity_longitude, parse_angularity_pvl, parse_angularity_ra,
+    calculate_prime_vertical_longitude, calculate_right_ascension, clamp_results_to_range,
+    get_opposite_geo_longitude, parse_angularity_longitude, parse_angularity_pvl,
+    parse_angularity_ra,
 };
 
 const SIDEREALMODE: c_int = 64 * 1024;
@@ -519,10 +520,8 @@ fn sort_list_of_angularities_by_closest_orb(
 
 pub fn find_longitudes_for_planet_on_meridian_axis(
     utc_dt: DateTime<Utc>,
-    planet_longitude: f64,
-    planet_latitude: f64,
-    min_longitude: i32,
-    max_longitude: i32,
+    planet_coords: &CoordinateSystemValues,
+    range: &CoordinateRange,
     precision: f64,
 ) -> anyhow::Result<Vec<f64>> {
     let julian_day_utc = get_julian_day(utc_dt);
@@ -546,8 +545,8 @@ pub fn find_longitudes_for_planet_on_meridian_axis(
         let svp = get_svp(julian_day_utc)?;
 
         let pvl = calculate_prime_vertical_longitude(
-            planet_longitude,
-            planet_latitude,
+            planet_coords.longitude,
+            planet_coords.latitude,
             ramc,
             obliquity,
             svp,
@@ -573,26 +572,13 @@ pub fn find_longitudes_for_planet_on_meridian_axis(
         };
     }
 
-    let mut results: Vec<f64> = Vec::new();
-
-    let opposite = get_opposite_geo_longitude(geo_longitude);
-    if geo_longitude > min_longitude as f64 && geo_longitude < max_longitude as f64 {
-        results.push(geo_longitude);
-    }
-
-    if opposite > min_longitude as f64 && opposite < max_longitude as f64 {
-        results.push(opposite);
-    }
-
-    Ok(results)
+    Ok(clamp_results_to_range(geo_longitude, range))
 }
 
 pub fn find_longitudes_for_planet_square_meridian(
     utc_dt: DateTime<Utc>,
-    planet_longitude: f64,
-    planet_latitude: f64,
-    min_longitude: i32,
-    max_longitude: i32,
+    planet_coords: &CoordinateSystemValues,
+    range: &CoordinateRange,
     precision: f64,
 ) -> anyhow::Result<Vec<f64>> {
     let julian_day_utc = get_julian_day(utc_dt);
@@ -620,7 +606,7 @@ pub fn find_longitudes_for_planet_square_meridian(
 
         let rising_square_mc = (mc - 90.0).rem_euclid(360.0);
 
-        orb = get_orb_signed(planet_longitude, rising_square_mc, 0.0, 360.0).unwrap();
+        orb = get_orb_signed(planet_coords.longitude, rising_square_mc, 0.0, 360.0).unwrap();
 
         // Normalize to 180º
         orb = match orb as i32 {
@@ -639,26 +625,13 @@ pub fn find_longitudes_for_planet_square_meridian(
         };
     }
 
-    let mut results: Vec<f64> = Vec::new();
-
-    let opposite = get_opposite_geo_longitude(geo_longitude);
-    if geo_longitude > min_longitude as f64 && geo_longitude < max_longitude as f64 {
-        results.push(geo_longitude);
-    }
-
-    if opposite > min_longitude as f64 && opposite < max_longitude as f64 {
-        results.push(opposite);
-    }
-
-    Ok(results)
+    Ok(clamp_results_to_range(geo_longitude, range))
 }
 
 pub fn find_longitudes_for_planet_square_ramc(
     utc_dt: DateTime<Utc>,
-    planet_longitude: f64,
-    planet_latitude: f64,
-    min_longitude: i32,
-    max_longitude: i32,
+    planet_coords: &CoordinateSystemValues,
+    range: &CoordinateRange,
     precision: f64,
 ) -> anyhow::Result<Vec<f64>> {
     let julian_day_utc = get_julian_day(utc_dt);
@@ -666,7 +639,16 @@ pub fn find_longitudes_for_planet_square_ramc(
 
     let mut orb = 0.0;
 
-    // find MC; IC is just on the opposite longitude
+    let obliquity = get_obliquity(julian_day_utc)?;
+    let svp = get_svp(julian_day_utc)?;
+    let ra = calculate_right_ascension(
+        planet_coords.longitude,
+        planet_coords.latitude,
+        svp,
+        obliquity,
+    );
+
+    // find one of EP-a or WP-a; the other is just on the opposite longitude
     let mut upper = 180.0;
     let mut lower = -180.0;
     let mut geo_longitude: f64 = 0.0;
@@ -678,12 +660,8 @@ pub fn find_longitudes_for_planet_square_ramc(
         geo_longitude = (upper + lower) / 2.0;
 
         let ramc = calculate_lst(utc_dt, geo_longitude) * 15.0;
-        let obliquity = get_obliquity(julian_day_utc)?;
-        let svp = get_svp(julian_day_utc)?;
 
-        let ra = calculate_right_ascension(planet_longitude, planet_latitude, svp, obliquity);
-
-        let ep_a = (ramc - 90.0).rem_euclid(360.0);
+        let ep_a = (ramc + 90.0).rem_euclid(360.0);
 
         orb = get_orb_signed(ra, ep_a, 0.0, 360.0).unwrap();
 
@@ -704,150 +682,48 @@ pub fn find_longitudes_for_planet_square_ramc(
         };
     }
 
-    let mut results: Vec<f64> = Vec::new();
-
-    let opposite = get_opposite_geo_longitude(geo_longitude);
-    if geo_longitude > min_longitude as f64 && geo_longitude < max_longitude as f64 {
-        results.push(geo_longitude);
-    }
-
-    if opposite > min_longitude as f64 && opposite < max_longitude as f64 {
-        results.push(opposite);
-    }
-
-    Ok(results)
+    Ok(clamp_results_to_range(geo_longitude, range))
 }
 
 pub fn find_longitudes_for_planet_on_horizon(
     utc_dt: DateTime<Utc>,
-    planet_longitude: f64,
-    planet_latitude: f64,
-    min_longitude: i32,
-    max_longitude: i32,
+    planet_coords: &CoordinateSystemValues,
+    range: &CoordinateRange,
     latitude: i32,
     precision: f64,
 ) -> anyhow::Result<Vec<f64>> {
     let julian_day_utc = get_julian_day(utc_dt);
 
-    // find Asc; Dsc is just the opposite longitude
+    let obliquity = get_obliquity(julian_day_utc)?;
+    let svp = get_svp(julian_day_utc)?;
+
     let mut upper = 180.0;
     let mut lower = -180.0;
-    let mut geo_longitude: f64 = 0.0;
+    let mut geo_longitude_1: f64 = 0.0;
+    let mut orb = 0.0;
+
+    let mut results: Vec<f64> = Vec::new();
+
+    // Asc or Dsc
     loop {
         if upper < lower {
             break;
         }
 
-        geo_longitude = (upper + lower) / 2.0;
+        geo_longitude_1 = (upper + lower) / 2.0;
 
-        let ramc = calculate_lst(utc_dt, geo_longitude) * 15.0;
-        let obliquity = get_obliquity(julian_day_utc)?;
-        let svp = get_svp(julian_day_utc)?;
+        let ramc = calculate_lst(utc_dt, geo_longitude_1) * 15.0;
 
-        // We're looking for 0º prime vertical longitude here, i.e. Ascendant
-        // so the "orb" is just the prime vertical longitude itself here
         let pvl = calculate_prime_vertical_longitude(
-            planet_longitude,
-            planet_latitude,
+            planet_coords.longitude,
+            planet_coords.latitude,
             ramc,
             obliquity,
             svp,
             latitude as f64,
         );
 
-        if pvl < precision {
-            break;
-        };
-
-        match pvl < 180.0 {
-            true => upper = geo_longitude - 0.01,
-            false => lower = geo_longitude + 0.01,
-        };
-    }
-
-    let mut results: Vec<f64> = Vec::new();
-
-    let opposite = get_opposite_geo_longitude(geo_longitude);
-    if geo_longitude > min_longitude as f64 && geo_longitude < max_longitude as f64 {
-        results.push(geo_longitude);
-    }
-
-    if opposite > min_longitude as f64 && opposite < max_longitude as f64 {
-        results.push(opposite);
-    }
-
-    Ok(results)
-}
-
-pub fn find_horizon_conjunctions_within_latitude_range(
-    utc_dt: DateTime<Utc>,
-    planet_longitude: f64,
-    planet_latitude: f64,
-    min_longitude: i32,
-    max_longitude: i32,
-    min_latitude: i32,
-    max_latitude: i32,
-    latitude_band_size: i32,
-    precision: f64,
-) -> anyhow::Result<Vec<(i32, f64)>> {
-    let julian_day_utc = get_julian_day(utc_dt);
-
-    // latitude, asc, dsc
-    let mut conjunctions: Vec<(i32, f64)> = Vec::new();
-    for latitude in (min_latitude..=max_latitude).step_by(latitude_band_size as usize) {
-        find_longitudes_for_planet_on_horizon(
-            utc_dt,
-            planet_longitude,
-            planet_latitude,
-            min_longitude,
-            max_longitude,
-            latitude,
-            precision,
-        )?
-        .into_iter()
-        .for_each(|longitude| {
-            conjunctions.push((latitude, longitude));
-        });
-    }
-
-    Ok(conjunctions)
-}
-
-pub fn find_longitudes_for_planet_square_horizon(
-    utc_dt: DateTime<Utc>,
-    planet_longitude: f64,
-    planet_latitude: f64,
-    min_longitude: i32,
-    max_longitude: i32,
-    latitude: i32,
-    precision: f64,
-) -> anyhow::Result<Vec<f64>> {
-    let julian_day_utc = get_julian_day(utc_dt);
-
-    let mut orb = 0.0;
-
-    // find Zenith; Nadir is just on the opposite longitude
-    let mut upper = 180.0;
-    let mut lower = -180.0;
-    let mut geo_longitude: f64 = 0.0;
-    loop {
-        if upper < lower {
-            break;
-        }
-
-        geo_longitude = (upper + lower) / 2.0;
-
-        let ramc = calculate_lst(utc_dt, geo_longitude) * 15.0;
-        let obliquity = get_obliquity(julian_day_utc)?;
-        let svp = get_svp(julian_day_utc)?;
-
-        let (_, angles) =
-            calculate_cusps_and_angles(julian_day_utc, geo_longitude, latitude as f64);
-        let asc = angles[0];
-
-        let culminating_square = (asc + 90.0).rem_euclid(360.0);
-
-        orb = get_orb_signed(planet_longitude, culminating_square, 0.0, 360.0).unwrap();
+        orb = get_orb_signed(pvl, 0.0, 0.0, 360.0).unwrap();
 
         // Normalize to 180º
         orb = match orb as i32 {
@@ -861,20 +737,201 @@ pub fn find_longitudes_for_planet_square_horizon(
         };
 
         match orb < 0.0 {
-            true => upper = geo_longitude - 0.01,
-            false => lower = geo_longitude + 0.01,
+            true => upper = geo_longitude_1 - 0.01,
+            false => lower = geo_longitude_1 + 0.01,
         };
     }
 
-    let mut results: Vec<f64> = Vec::new();
-
-    let opposite = get_opposite_geo_longitude(geo_longitude);
-    if geo_longitude > min_longitude as f64 && geo_longitude < max_longitude as f64 {
-        results.push(geo_longitude);
+    if geo_longitude_1 > range.min_longitude as f64 && geo_longitude_1 < range.max_longitude as f64
+    {
+        results.push(geo_longitude_1);
     }
 
-    if opposite > min_longitude as f64 && opposite < max_longitude as f64 {
-        results.push(opposite);
+    upper = 180.0;
+    lower = -180.0;
+
+    // Exclude the first longitude so we don't accidentally find it again
+    match geo_longitude_1 > 0.0 {
+        true => upper = geo_longitude_1 - 1.0,
+        false => lower = geo_longitude_1 + 1.0,
+    };
+
+    let mut geo_longitude_2 = 0.0;
+    loop {
+        if upper < lower {
+            break;
+        }
+
+        geo_longitude_2 = (upper + lower) / 2.0;
+
+        let ramc = calculate_lst(utc_dt, geo_longitude_2) * 15.0;
+
+        let pvl = calculate_prime_vertical_longitude(
+            planet_coords.longitude,
+            planet_coords.latitude,
+            ramc,
+            obliquity,
+            svp,
+            latitude as f64,
+        );
+
+        orb = get_orb_signed(pvl, 180.0, 0.0, 360.0).unwrap();
+
+        // Normalize to 180º
+        orb = match orb as i32 {
+            -360..=-180 => orb + 360.0,
+            180..=360 => orb - 360.0,
+            _ => orb,
+        };
+
+        if f64::abs(orb) < precision {
+            break;
+        };
+
+        match orb < 0.0 {
+            true => upper = geo_longitude_2 - 0.01,
+            false => lower = geo_longitude_2 + 0.01,
+        };
+    }
+    // Find the other of Asc or Dsc
+
+    if geo_longitude_2 > range.min_longitude as f64 && geo_longitude_2 < range.max_longitude as f64
+    {
+        results.push(geo_longitude_2);
+    }
+
+    Ok(results)
+}
+
+pub fn find_horizon_conjunctions_within_latitude_range(
+    utc_dt: DateTime<Utc>,
+    planet_coords: &CoordinateSystemValues,
+    range: &CoordinateRange,
+    latitude_band_size: i32,
+    precision: f64,
+) -> anyhow::Result<Vec<(i32, f64)>> {
+    let julian_day_utc = get_julian_day(utc_dt);
+
+    // latitude, asc or dsc
+    let mut conjunctions: Vec<(i32, f64)> = Vec::new();
+    for latitude in (range.min_latitude..=range.max_latitude).step_by(latitude_band_size as usize) {
+        find_longitudes_for_planet_on_horizon(utc_dt, planet_coords, range, latitude, precision)?
+            .into_iter()
+            .for_each(|longitude| {
+                conjunctions.push((latitude, longitude));
+            });
+    }
+
+    Ok(conjunctions)
+}
+
+pub fn find_longitudes_for_planet_square_horizon(
+    utc_dt: DateTime<Utc>,
+    planet_coords: &CoordinateSystemValues,
+    range: &CoordinateRange,
+    latitude: i32,
+    precision: f64,
+) -> anyhow::Result<Vec<f64>> {
+    let julian_day_utc = get_julian_day(utc_dt);
+
+    let mut orb = 0.0;
+
+    let mut results: Vec<f64> = Vec::new();
+
+    // find one of Zenith or Nadir
+    let mut upper = 180.0;
+    let mut lower = -180.0;
+    let mut geo_longitude_1: f64 = 0.0;
+    loop {
+        if upper < lower {
+            break;
+        }
+
+        geo_longitude_1 = (upper + lower) / 2.0;
+
+        let ramc = calculate_lst(utc_dt, geo_longitude_1) * 15.0;
+        let obliquity = get_obliquity(julian_day_utc)?;
+        let svp = get_svp(julian_day_utc)?;
+
+        let (_, angles) =
+            calculate_cusps_and_angles(julian_day_utc, geo_longitude_1, latitude as f64);
+        let asc = angles[0];
+
+        let culminating_square = (asc + 90.0).rem_euclid(360.0);
+
+        orb = get_orb_signed(planet_coords.longitude, culminating_square, 0.0, 360.0).unwrap();
+
+        // Normalize to 180º
+        orb = match orb as i32 {
+            -360..=-180 => orb + 360.0,
+            180..=360 => orb - 360.0,
+            _ => orb,
+        };
+
+        if f64::abs(orb) < precision {
+            break;
+        };
+
+        match orb < 0.0 {
+            true => upper = geo_longitude_1 - 0.01,
+            false => lower = geo_longitude_1 + 0.01,
+        };
+    }
+
+    if geo_longitude_1 > range.min_longitude as f64 && geo_longitude_1 < range.max_longitude as f64
+    {
+        results.push(geo_longitude_1);
+    }
+
+    // find the other of of Zenith or Nadir
+    upper = 180.0;
+    lower = -180.0;
+
+    match geo_longitude_1 > 0.0 {
+        true => upper = geo_longitude_1 - 1.0,
+        false => lower = geo_longitude_1 + 1.0,
+    };
+
+    let mut geo_longitude_2 = 0.0;
+    loop {
+        if upper < lower {
+            break;
+        }
+
+        geo_longitude_2 = (upper + lower) / 2.0;
+
+        let ramc = calculate_lst(utc_dt, geo_longitude_2) * 15.0;
+        let obliquity = get_obliquity(julian_day_utc)?;
+        let svp = get_svp(julian_day_utc)?;
+
+        let (_, angles) =
+            calculate_cusps_and_angles(julian_day_utc, geo_longitude_2, latitude as f64);
+        let asc = angles[0];
+
+        let anti_culminating_square = (asc - 90.0).rem_euclid(360.0);
+
+        orb = get_orb_signed(planet_coords.longitude, anti_culminating_square, 0.0, 360.0).unwrap();
+
+        // Normalize to 180º
+        orb = match orb as i32 {
+            -360..=-180 => orb + 360.0,
+            180..=360 => orb - 360.0,
+            _ => orb,
+        };
+
+        if f64::abs(orb) < precision {
+            break;
+        };
+
+        match orb < 0.0 {
+            true => upper = geo_longitude_2 - 0.01,
+            false => lower = geo_longitude_2 + 0.01,
+        };
+    }
+
+    if geo_longitude_2 > range.min_longitude as f64 && geo_longitude_2 < range.max_longitude as f64
+    {
+        results.push(geo_longitude_2);
     }
 
     Ok(results)
@@ -883,12 +940,8 @@ pub fn find_longitudes_for_planet_square_horizon(
 /// Returns latitude, and the two longitudes for the square
 pub fn find_horizon_squares_within_latitude_range(
     utc_dt: DateTime<Utc>,
-    planet_longitude: f64,
-    planet_latitude: f64,
-    min_longitude: i32,
-    max_longitude: i32,
-    min_latitude: i32,
-    max_latitude: i32,
+    planet_coords: &CoordinateSystemValues,
+    range: &CoordinateRange,
     latitude_band_size: i32,
     precision: f64,
 ) -> anyhow::Result<Vec<(i32, f64)>> {
@@ -896,13 +949,11 @@ pub fn find_horizon_squares_within_latitude_range(
 
     // latitude, asc, dsc
     let mut conjunctions: Vec<(i32, f64)> = Vec::new();
-    for latitude in (min_latitude..=max_latitude).step_by(latitude_band_size as usize) {
+    for latitude in (range.min_latitude..=range.max_latitude).step_by(latitude_band_size as usize) {
         find_longitudes_for_planet_square_horizon(
             utc_dt,
-            planet_longitude,
-            planet_latitude,
-            min_longitude,
-            max_longitude,
+            planet_coords,
+            range,
             latitude,
             precision,
         )?
@@ -1012,79 +1063,65 @@ pub fn foreground_coordinates_in_solunar_return(
 
         longitude_lines.insert(planet_name_with_context.clone(), Vec::new());
 
-        let a = find_longitudes_for_planet_on_meridian_axis(
-            solunar_dt,
-            planet.coordinates.longitude,
-            planet.coordinates.latitude,
-            range.min_longitude,
-            range.max_longitude,
-            0.01,
-        )?;
+        // let a = find_longitudes_for_planet_on_meridian_axis(
+        //     solunar_dt,
+        //     &planet.coordinates,
+        //     &range,
+        //     0.01,
+        // )?;
 
-        longitude_lines
-            .get_mut(&planet_name_with_context)
-            .unwrap()
-            .extend(a);
+        // longitude_lines
+        //     .get_mut(&planet_name_with_context)
+        //     .unwrap()
+        //     .extend(a);
 
-        let b = find_longitudes_for_planet_square_meridian(
-            solunar_dt,
-            planet.coordinates.longitude,
-            planet.coordinates.latitude,
-            range.min_longitude,
-            range.max_longitude,
-            0.01,
-        )?;
+        // let b = find_longitudes_for_planet_square_meridian(
+        //     solunar_dt,
+        //     &planet.coordinates,
+        //     &range,
+        //     0.01,
+        // )?;
 
-        longitude_lines
-            .get_mut(&planet_name_with_context)
-            .unwrap()
-            .extend(b);
+        // longitude_lines
+        //     .get_mut(&planet_name_with_context)
+        //     .unwrap()
+        //     .extend(b);
 
-        let c = find_longitudes_for_planet_square_ramc(
-            solunar_dt,
-            planet.coordinates.longitude,
-            planet.coordinates.latitude,
-            range.min_longitude,
-            range.max_longitude,
-            0.01,
-        )?;
+        // let c = find_longitudes_for_planet_square_ramc(
+        //     solunar_dt,
+        //     &planet.coordinates,
+        //     &range,
+        //     0.01,
+        // )?;
 
-        longitude_lines
-            .get_mut(&planet_name_with_context)
-            .unwrap()
-            .extend(c);
+        // longitude_lines
+        //     .get_mut(&planet_name_with_context)
+        //     .unwrap()
+        //     .extend(c);
 
-        let d = find_horizon_conjunctions_within_latitude_range(
-            solunar_dt,
-            planet.coordinates.longitude,
-            planet.coordinates.latitude,
-            range.min_longitude,
-            range.max_longitude,
-            range.min_latitude,
-            range.max_latitude,
-            5,
-            0.01,
-        )?;
+        // let d = find_horizon_conjunctions_within_latitude_range(
+        //     solunar_dt,
+        //     &planet.coordinates,
+        //     &range,
+        //     5,
+        //     0.01,
+        // )?;
 
-        d.into_iter().for_each(|(latitude, longitude)| {
-            latitude_bands.entry(latitude).or_insert(Vec::new());
-            let mut planet_name_with_context = String::from("(R) ");
-            planet_name_with_context.push_str(planet.name.as_str());
+        // d.into_iter().for_each(|(latitude, longitude)| {
+        //     latitude_bands.entry(latitude).or_insert(Vec::new());
+        //     let mut planet_name_with_context = String::from("(R) ");
+        //     planet_name_with_context.push_str(planet.name.as_str());
 
-            latitude_bands
-                .get_mut(&latitude)
-                .unwrap()
-                .push((planet_name_with_context.clone(), longitude));
-        });
+        //     latitude_bands
+        //         .get_mut(&latitude)
+        //         .unwrap()
+        //         .push((planet_name_with_context.clone(), longitude));
+        // });
 
         let e = find_horizon_squares_within_latitude_range(
             solunar_dt,
-            planet.coordinates.longitude,
-            planet.coordinates.latitude,
-            range.min_longitude,
-            range.max_longitude,
-            range.min_latitude,
-            range.max_latitude,
+            &planet.coordinates,
+            &range,
             5,
             0.01,
         )?;
@@ -1111,99 +1148,81 @@ pub fn foreground_coordinates_in_solunar_return(
 
         longitude_lines.insert(planet_name_with_context.clone(), Vec::new());
 
-        let a = find_longitudes_for_planet_on_meridian_axis(
-            solunar_dt,
-            planet.coordinates.longitude,
-            planet.coordinates.latitude,
-            range.min_longitude,
-            range.max_longitude,
-            0.01,
-        )?;
+        // let a = find_longitudes_for_planet_on_meridian_axis(
+        //     solunar_dt,
+        //     &planet.coordinates,
+        //     &range,
+        //     0.01,
+        // )?;
 
-        longitude_lines
-            .get_mut(&planet_name_with_context)
-            .unwrap()
-            .extend(a);
+        // longitude_lines
+        //     .get_mut(&planet_name_with_context)
+        //     .unwrap()
+        //     .extend(a);
 
-        let b = find_longitudes_for_planet_square_meridian(
-            solunar_dt,
-            planet.coordinates.longitude,
-            planet.coordinates.latitude,
-            range.min_longitude,
-            range.max_longitude,
-            0.01,
-        )?;
+        // let b = find_longitudes_for_planet_square_meridian(
+        //     solunar_dt,
+        //     &planet.coordinates,
+        //     &range,
+        //     0.01,
+        // )?;
 
-        longitude_lines
-            .get_mut(&planet_name_with_context)
-            .unwrap()
-            .extend(b);
+        // longitude_lines
+        //     .get_mut(&planet_name_with_context)
+        //     .unwrap()
+        //     .extend(b);
 
-        let c = find_longitudes_for_planet_square_ramc(
-            radix_utc,
-            planet.coordinates.longitude,
-            planet.coordinates.latitude,
-            range.min_longitude,
-            range.max_longitude,
-            0.01,
-        )?;
+        // let c =
+        //     find_longitudes_for_planet_square_ramc(solunar_dt, &planet.coordinates, &range, 0.01)?;
 
-        longitude_lines
-            .get_mut(&planet_name_with_context)
-            .unwrap()
-            .extend(c);
+        // longitude_lines
+        //     .get_mut(&planet_name_with_context)
+        //     .unwrap()
+        //     .extend(c);
 
-        let d = find_horizon_conjunctions_within_latitude_range(
-            solunar_dt,
-            planet.coordinates.longitude,
-            planet.coordinates.latitude,
-            range.min_longitude,
-            range.max_longitude,
-            range.min_latitude,
-            range.max_latitude,
-            5,
-            0.01,
-        )?;
+        // let d = find_horizon_conjunctions_within_latitude_range(
+        //     solunar_dt,
+        //     &planet.coordinates,
+        //     &range,
+        //     5,
+        //     0.01,
+        // )?;
 
-        d.into_iter().for_each(|(latitude, longitude)| {
-            latitude_bands.entry(latitude).or_insert(Vec::new());
-            let mut planet_name_with_context = String::from("(T) ");
-            planet_name_with_context.push_str(planet.name.as_str());
+        // d.into_iter().for_each(|(latitude, longitude)| {
+        //     latitude_bands.entry(latitude).or_insert(Vec::new());
+        //     let mut planet_name_with_context = String::from("(T) ");
+        //     planet_name_with_context.push_str(planet.name.as_str());
 
-            latitude_bands
-                .get_mut(&latitude)
-                .unwrap()
-                .push((planet_name_with_context.clone(), longitude));
-        });
+        //     latitude_bands
+        //         .get_mut(&latitude)
+        //         .unwrap()
+        //         .push((planet_name_with_context.clone(), longitude));
+        // });
 
-        let e = find_horizon_squares_within_latitude_range(
-            solunar_dt,
-            planet.coordinates.longitude,
-            planet.coordinates.latitude,
-            range.min_longitude,
-            range.max_longitude,
-            range.min_latitude,
-            range.max_latitude,
-            5,
-            0.01,
-        )?;
+        // let e = find_horizon_squares_within_latitude_range(
+        //     solunar_dt,
+        //     &planet.coordinates,
+        //     &range,
+        //     5,
+        //     0.01,
+        // )?;
 
-        e.into_iter().for_each(|(latitude, longitude)| {
-            latitude_bands.entry(latitude).or_insert(Vec::new());
-            let mut planet_name_with_context = String::from("(T) ");
-            planet_name_with_context.push_str(planet.name.as_str());
+        // e.into_iter().for_each(|(latitude, longitude)| {
+        //     latitude_bands.entry(latitude).or_insert(Vec::new());
+        //     let mut planet_name_with_context = String::from("(T) ");
+        //     planet_name_with_context.push_str(planet.name.as_str());
 
-            latitude_bands
-                .get_mut(&latitude)
-                .unwrap()
-                .push((planet_name_with_context.clone(), longitude));
-        });
+        //     latitude_bands
+        //         .get_mut(&latitude)
+        //         .unwrap()
+        //         .push((planet_name_with_context.clone(), longitude));
+        // });
     }
 
     Ok((longitude_lines, latitude_bands))
 }
 
-// I can rewrite these functions to take a Coordinates and Range structs instead of a bunch of arguments.
+// TODO - convert final map to vec of tuples, so we can do latitudes in order
 
 #[cfg(test)]
 mod tests {
@@ -1213,31 +1232,31 @@ mod tests {
     fn t() {
         open_dll();
         let dt =
-            spacetime_utils::string_to_naive_datetime("07/19/1997 10:00am".to_string()).unwrap();
-        let radix_dt = spacetime_utils::naive_to_local_tz(dt, -86.59296, 39.16586).unwrap();
+            spacetime_utils::string_to_naive_datetime("12/20/1989 10:20pm".to_string()).unwrap();
+        let radix_dt = spacetime_utils::naive_to_local_tz(dt, -74.09184, 40.90345).unwrap();
         let target_dt_naive =
-            spacetime_utils::string_to_naive_datetime("07/01/2024 10:00am".to_string()).unwrap();
+            spacetime_utils::string_to_naive_datetime("11/01/2024 10:00am".to_string()).unwrap();
         let target_dt =
-            spacetime_utils::naive_to_local_tz(target_dt_naive, -86.59296, 39.16586).unwrap();
+            spacetime_utils::naive_to_local_tz(target_dt_naive, -74.09184, 40.90345).unwrap();
 
         let map = foreground_coordinates_in_solunar_return(
             radix_dt,
             target_dt,
             structs::CoordinateRange {
-                min_longitude: -125,
-                max_longitude: -67,
-                min_latitude: 29,
-                max_latitude: 50,
+                min_longitude: -180,
+                max_longitude: 180,
+                min_latitude: 34,
+                max_latitude: 34,
             },
-            vec![3, 5, 7],
+            vec![0, 1, 2, 4, 6, 7],
             0,
             1,
         )
         .unwrap();
 
-        println!("{:?}", map.0);
-        println!("");
-        println!("");
+        // println!("{:?}", map.0);
+        // println!("");
+        // println!("");
         println!("{:?}", map.1);
 
         close_dll();
