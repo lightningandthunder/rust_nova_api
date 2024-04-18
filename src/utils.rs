@@ -6,10 +6,10 @@ Nova Rust is free software: you can redistribute it and/or modify it under the t
 
 Nova Rust is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more details.
 
-You should have received a copy of the GNU Affero General Public License along with Foobar. If not, see <https://www.gnu.org/licenses/>. 
+You should have received a copy of the GNU Affero General Public License along with Foobar. If not, see <https://www.gnu.org/licenses/>.
 */
 
-use std::f64::consts::PI;
+use std::{collections::HashMap, f64::consts::PI};
 
 use crate::structs::CoordinateRange;
 
@@ -163,31 +163,23 @@ pub fn parse_angularity_longitude(longitude: f64, asc: f64, mc: f64, orb: f64) -
     }
 }
 
-pub fn round_to_digit(number: f64, digits: i8) -> f64 {
-    let rounding_factor = 10.0 * digits as f64;
-    (number * rounding_factor).round() / (10.0 * rounding_factor)
-}
 
 pub fn get_opposite_geo_longitude(longitude: f64) -> f64 {
     match longitude as i32 {
         -180..=0 => 180.0 + longitude,
         _ => longitude - 180.0,
     }
-
 }
 
-pub fn clamp_results_to_range(longitude: f64, range: &CoordinateRange) -> Vec<f64> {
-    let mut results: Vec<f64> = Vec::new();
+pub fn clamp_results_to_range(longitudes: Vec<f64>, range: &CoordinateRange) -> Vec<f64> {
+    longitudes.iter().fold(Vec::new(), |mut acc, &longitude| {
+        if longitude > range.min_longitude as f64 && longitude < range.max_longitude as f64 {
+            acc.push(longitude);
+        }
+        acc
+    })
+}
 
-    let opposite = get_opposite_geo_longitude(longitude);
-
-    if longitude > range.min_longitude as f64 && longitude < range.max_longitude as f64 {
-        results.push(longitude);
-    }
-
-    if opposite > range.min_longitude as f64 && opposite < range.max_longitude as f64 {
-        results.push(opposite);
-    }
-
-    results
+pub fn format_two_decimals(fl: f64) -> String {
+    format!("{:.02}", fl)
 }

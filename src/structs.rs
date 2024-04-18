@@ -152,3 +152,13 @@ pub struct CoordinateRange {
     pub min_longitude: i32,
     pub max_longitude: i32,
 }
+
+#[derive(Debug)]
+pub struct NonHorizonForegroundLongitudes {
+    pub planets: Vec<(String, Vec<String>)>
+}
+
+#[derive(Debug)]
+pub struct HorizonForegroundLongitudes {
+    pub planets: Vec<(i32, Vec<(String, String)>)>
+}

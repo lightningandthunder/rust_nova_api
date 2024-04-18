@@ -17,7 +17,7 @@ pub mod utils;
 use crate::structs::{
     AngularityOrb, CoordinateSystemValues, Location, MeasuringFramework, Planet, SiderealContext,
 };
-use crate::utils::{decimal_to_dms, round_to_digit};
+use crate::utils::decimal_to_dms;
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Datelike, Days, NaiveDate, TimeDelta, TimeZone, Timelike, Utc};
 use chrono_tz::Tz;
@@ -27,16 +27,16 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::ops::Add;
-use structs::{Angularities, CoordinateRange};
+use structs::{
+    Angularities, CoordinateRange, HorizonForegroundLongitudes, NonHorizonForegroundLongitudes,
+};
 
 use reverse_geocoder::{ReverseGeocoder, SearchResult};
 use std::ffi::{c_double, CString};
 use std::{fmt, ptr};
 
 use utils::{
-    calculate_prime_vertical_longitude, calculate_right_ascension, clamp_results_to_range,
-    get_opposite_geo_longitude, parse_angularity_longitude, parse_angularity_pvl,
-    parse_angularity_ra,
+    calculate_prime_vertical_longitude, calculate_right_ascension, clamp_results_to_range, format_two_decimals, get_opposite_geo_longitude, parse_angularity_longitude, parse_angularity_pvl, parse_angularity_ra
 };
 
 const SIDEREALMODE: c_int = 64 * 1024;
@@ -572,7 +572,10 @@ pub fn find_longitudes_for_planet_on_meridian_axis(
         };
     }
 
-    Ok(clamp_results_to_range(geo_longitude, range))
+    Ok(clamp_results_to_range(
+        Vec::from([geo_longitude, get_opposite_geo_longitude(geo_longitude)]),
+        range,
+    ))
 }
 
 pub fn find_longitudes_for_planet_square_meridian(
@@ -625,7 +628,10 @@ pub fn find_longitudes_for_planet_square_meridian(
         };
     }
 
-    Ok(clamp_results_to_range(geo_longitude, range))
+    Ok(clamp_results_to_range(
+        Vec::from([geo_longitude, get_opposite_geo_longitude(geo_longitude)]),
+        range,
+    ))
 }
 
 pub fn find_longitudes_for_planet_square_ramc(
@@ -682,7 +688,10 @@ pub fn find_longitudes_for_planet_square_ramc(
         };
     }
 
-    Ok(clamp_results_to_range(geo_longitude, range))
+    Ok(clamp_results_to_range(
+        Vec::from([geo_longitude, get_opposite_geo_longitude(geo_longitude)]),
+        range,
+    ))
 }
 
 pub fn find_longitudes_for_planet_on_horizon(
@@ -973,7 +982,7 @@ pub fn foreground_coordinates_in_solunar_return(
     allowed_body_numbers: Vec<i32>,
     body_number: i32,
     harmonic: i32,
-) -> anyhow::Result<(HashMap<String, Vec<f64>>, HashMap<i32, Vec<(String, f64)>>)> {
+) -> anyhow::Result<(NonHorizonForegroundLongitudes, HorizonForegroundLongitudes)> {
     let mut angular_locations: HashMap<String, Vec<AngularityOrb>> = HashMap::new();
 
     let radix_utc = radix_dt.with_timezone(&Utc);
@@ -1063,62 +1072,44 @@ pub fn foreground_coordinates_in_solunar_return(
 
         longitude_lines.insert(planet_name_with_context.clone(), Vec::new());
 
-        // let a = find_longitudes_for_planet_on_meridian_axis(
-        //     solunar_dt,
-        //     &planet.coordinates,
-        //     &range,
-        //     0.01,
-        // )?;
+        let meridian_conj_longitudes = find_longitudes_for_planet_on_meridian_axis(
+            solunar_dt,
+            &planet.coordinates,
+            &range,
+            0.01,
+        )?;
 
-        // longitude_lines
-        //     .get_mut(&planet_name_with_context)
-        //     .unwrap()
-        //     .extend(a);
+        longitude_lines
+            .get_mut(&planet_name_with_context)
+            .unwrap()
+            .extend(meridian_conj_longitudes);
 
-        // let b = find_longitudes_for_planet_square_meridian(
-        //     solunar_dt,
-        //     &planet.coordinates,
-        //     &range,
-        //     0.01,
-        // )?;
+        let meridian_square_longitudes = find_longitudes_for_planet_square_meridian(
+            solunar_dt,
+            &planet.coordinates,
+            &range,
+            0.01,
+        )?;
 
-        // longitude_lines
-        //     .get_mut(&planet_name_with_context)
-        //     .unwrap()
-        //     .extend(b);
+        longitude_lines
+            .get_mut(&planet_name_with_context)
+            .unwrap()
+            .extend(meridian_square_longitudes);
 
-        // let c = find_longitudes_for_planet_square_ramc(
-        //     solunar_dt,
-        //     &planet.coordinates,
-        //     &range,
-        //     0.01,
-        // )?;
+        let ramc_square_longitudes =
+            find_longitudes_for_planet_square_ramc(solunar_dt, &planet.coordinates, &range, 0.01)?;
 
-        // longitude_lines
-        //     .get_mut(&planet_name_with_context)
-        //     .unwrap()
-        //     .extend(c);
+        longitude_lines
+            .get_mut(&planet_name_with_context)
+            .unwrap()
+            .extend(ramc_square_longitudes);
 
-        // let d = find_horizon_conjunctions_within_latitude_range(
-        //     solunar_dt,
-        //     &planet.coordinates,
-        //     &range,
-        //     5,
-        //     0.01,
-        // )?;
+        longitude_lines
+            .get_mut(&planet_name_with_context)
+            .unwrap()
+            .sort_by(|a, b| a.partial_cmp(b).unwrap());
 
-        // d.into_iter().for_each(|(latitude, longitude)| {
-        //     latitude_bands.entry(latitude).or_insert(Vec::new());
-        //     let mut planet_name_with_context = String::from("(R) ");
-        //     planet_name_with_context.push_str(planet.name.as_str());
-
-        //     latitude_bands
-        //         .get_mut(&latitude)
-        //         .unwrap()
-        //         .push((planet_name_with_context.clone(), longitude));
-        // });
-
-        let e = find_horizon_squares_within_latitude_range(
+        let horizon_conj_points = find_horizon_conjunctions_within_latitude_range(
             solunar_dt,
             &planet.coordinates,
             &range,
@@ -1126,7 +1117,26 @@ pub fn foreground_coordinates_in_solunar_return(
             0.01,
         )?;
 
-        e.into_iter().for_each(|(latitude, longitude)| {
+        horizon_conj_points.into_iter().for_each(|(latitude, longitude)| {
+            latitude_bands.entry(latitude).or_insert(Vec::new());
+            let mut planet_name_with_context = String::from("(R) ");
+            planet_name_with_context.push_str(planet.name.as_str());
+
+            latitude_bands
+                .get_mut(&latitude)
+                .unwrap()
+                .push((planet_name_with_context.clone(), longitude));
+        });
+
+        let horizon_square_points = find_horizon_squares_within_latitude_range(
+            solunar_dt,
+            &planet.coordinates,
+            &range,
+            5,
+            0.01,
+        )?;
+
+        horizon_square_points.into_iter().for_each(|(latitude, longitude)| {
             latitude_bands.entry(latitude).or_insert(Vec::new());
             let mut planet_name_with_context = String::from("(R) ");
             planet_name_with_context.push_str(planet.name.as_str());
@@ -1148,84 +1158,107 @@ pub fn foreground_coordinates_in_solunar_return(
 
         longitude_lines.insert(planet_name_with_context.clone(), Vec::new());
 
-        // let a = find_longitudes_for_planet_on_meridian_axis(
-        //     solunar_dt,
-        //     &planet.coordinates,
-        //     &range,
-        //     0.01,
-        // )?;
+        let meridian_conj_longitudes = find_longitudes_for_planet_on_meridian_axis(
+            solunar_dt,
+            &planet.coordinates,
+            &range,
+            0.01,
+        )?;
 
-        // longitude_lines
-        //     .get_mut(&planet_name_with_context)
-        //     .unwrap()
-        //     .extend(a);
+        longitude_lines
+            .get_mut(&planet_name_with_context)
+            .unwrap()
+            .extend(meridian_conj_longitudes);
 
-        // let b = find_longitudes_for_planet_square_meridian(
-        //     solunar_dt,
-        //     &planet.coordinates,
-        //     &range,
-        //     0.01,
-        // )?;
+        let meridian_square_longitudes = find_longitudes_for_planet_square_meridian(
+            solunar_dt,
+            &planet.coordinates,
+            &range,
+            0.01,
+        )?;
 
-        // longitude_lines
-        //     .get_mut(&planet_name_with_context)
-        //     .unwrap()
-        //     .extend(b);
+        longitude_lines
+            .get_mut(&planet_name_with_context)
+            .unwrap()
+            .extend(meridian_square_longitudes);
 
-        // let c =
-        //     find_longitudes_for_planet_square_ramc(solunar_dt, &planet.coordinates, &range, 0.01)?;
+        let ramc_square_longitudes =
+            find_longitudes_for_planet_square_ramc(solunar_dt, &planet.coordinates, &range, 0.01)?;
 
-        // longitude_lines
-        //     .get_mut(&planet_name_with_context)
-        //     .unwrap()
-        //     .extend(c);
+        longitude_lines
+            .get_mut(&planet_name_with_context)
+            .unwrap()
+            .extend(ramc_square_longitudes);
 
-        // let d = find_horizon_conjunctions_within_latitude_range(
-        //     solunar_dt,
-        //     &planet.coordinates,
-        //     &range,
-        //     5,
-        //     0.01,
-        // )?;
+        let horizon_conj_points = find_horizon_conjunctions_within_latitude_range(
+            solunar_dt,
+            &planet.coordinates,
+            &range,
+            5,
+            0.01,
+        )?;
 
-        // d.into_iter().for_each(|(latitude, longitude)| {
-        //     latitude_bands.entry(latitude).or_insert(Vec::new());
-        //     let mut planet_name_with_context = String::from("(T) ");
-        //     planet_name_with_context.push_str(planet.name.as_str());
+        horizon_conj_points.into_iter().for_each(|(latitude, longitude)| {
+            latitude_bands.entry(latitude).or_insert(Vec::new());
+            let mut planet_name_with_context = String::from("(T) ");
+            planet_name_with_context.push_str(planet.name.as_str());
 
-        //     latitude_bands
-        //         .get_mut(&latitude)
-        //         .unwrap()
-        //         .push((planet_name_with_context.clone(), longitude));
-        // });
+            latitude_bands
+                .get_mut(&latitude)
+                .unwrap()
+                .push((planet_name_with_context.clone(), longitude));
+        });
 
-        // let e = find_horizon_squares_within_latitude_range(
-        //     solunar_dt,
-        //     &planet.coordinates,
-        //     &range,
-        //     5,
-        //     0.01,
-        // )?;
+        let horizon_square_points = find_horizon_squares_within_latitude_range(
+            solunar_dt,
+            &planet.coordinates,
+            &range,
+            5,
+            0.01,
+        )?;
 
-        // e.into_iter().for_each(|(latitude, longitude)| {
-        //     latitude_bands.entry(latitude).or_insert(Vec::new());
-        //     let mut planet_name_with_context = String::from("(T) ");
-        //     planet_name_with_context.push_str(planet.name.as_str());
+        horizon_square_points.into_iter().for_each(|(latitude, longitude)| {
+            latitude_bands.entry(latitude).or_insert(Vec::new());
+            let mut planet_name_with_context = String::from("(T) ");
+            planet_name_with_context.push_str(planet.name.as_str());
 
-        //     latitude_bands
-        //         .get_mut(&latitude)
-        //         .unwrap()
-        //         .push((planet_name_with_context.clone(), longitude));
-        // });
+            latitude_bands
+                .get_mut(&latitude)
+                .unwrap()
+                .push((planet_name_with_context.clone(), longitude));
+        });
     }
 
-    Ok((longitude_lines, latitude_bands))
-}
+    let mut longitude_vec = NonHorizonForegroundLongitudes {
+        planets: Vec::new(),
+    };
 
-// TODO - convert final map to vec of tuples, so we can do latitudes in order
+    for (planet_identifier, longitudes) in longitude_lines.iter() {
+        let mut vec = longitudes.clone();
+        vec.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+        let stringified_vec = vec.into_iter().map(|f| format_two_decimals(f)).collect::<Vec<String>>();
+        longitude_vec.planets.push((planet_identifier.clone(), stringified_vec));
+    }
+
+    let mut latitude_vec = HorizonForegroundLongitudes {
+        planets: Vec::new(),
+    };
+
+    for (&latitude, value) in latitude_bands.iter() {
+        let mut vec = value.clone();
+        vec.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        let stringified_vec = vec.into_iter().map(|(key, f)| (key, format_two_decimals(f))).collect::<Vec<(String, String)>>();
+        latitude_vec.planets.push((latitude, stringified_vec));
+    }
+
+    latitude_vec.planets.sort_unstable_by_key(|v| v.0);
+
+    Ok((longitude_vec, latitude_vec))
+}
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     #[test]
@@ -1239,25 +1272,25 @@ mod tests {
         let target_dt =
             spacetime_utils::naive_to_local_tz(target_dt_naive, -74.09184, 40.90345).unwrap();
 
-        let map = foreground_coordinates_in_solunar_return(
+        let (longitudes, bands) = foreground_coordinates_in_solunar_return(
             radix_dt,
             target_dt,
             structs::CoordinateRange {
-                min_longitude: -180,
-                max_longitude: 180,
-                min_latitude: 34,
-                max_latitude: 34,
+                min_longitude: -120,
+                max_longitude: 120,
+                min_latitude: 29,
+                max_latitude: 49,
             },
-            vec![0, 1, 2, 4, 6, 7],
+            vec![3, 5, 7],
             0,
             1,
         )
         .unwrap();
 
-        // println!("{:?}", map.0);
-        // println!("");
-        // println!("");
-        println!("{:?}", map.1);
+        println!("{:?}", longitudes);
+        println!("");
+        println!("");
+        println!("{:?}", bands);
 
         close_dll();
     }
